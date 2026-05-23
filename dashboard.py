@@ -1,18 +1,17 @@
 import os
 
-# --- FIX FOR GITHUB TIMEOUT ERROR ---
 os.environ["ULTRALYTICS_NO_AUTOUPDATES"] = "true"
 
 import streamlit as st
 import cv2
 import time
 import pandas as pd
-import numpy as np
+import hashlib
 from ultralytics import YOLO
 from supabase import create_client
 from datetime import datetime
-from PIL import Image
 import serial
+import serial.tools.list_ports
 import plotly.express as px
 
 
@@ -100,12 +99,9 @@ apply_custom_styles()
 # =========================================================
 # 3. SUPABASE CONFIGURATION
 # =========================================================
-# IMPORTANT:
-# For FYP demo this can work, but for safety you should later move
-# these credentials into Streamlit secrets or environment variables.
 
-SUPABASE_URL = "https://easbotszklartfkakkxm.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVhc2JvdHN6a2xhcnRma2Fra3htIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc1MzI5NzgsImV4cCI6MjA4MzEwODk3OH0.O9tQ6ZR56UTsRqmXfOrYtCBPmAyQKtjh3_quBKXHYfE"
+SUPABASE_URL = st.secrets["SUPABASE_URL"]
+SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
 
 
 # =========================================================
@@ -118,25 +114,37 @@ if "user" not in st.session_state:
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 
+if "pending_delete_user_id" not in st.session_state:
+    st.session_state.pending_delete_user_id = None
+
 
 # =========================================================
 # 5. CACHED RESOURCES
 # =========================================================
 
+def get_available_ports():
+    ports = serial.tools.list_ports.comports()
+    return [port.device for port in ports]
+
+
 @st.cache_resource
-def connect_arduino():
+def connect_arduino(selected_port):
+    if selected_port is None:
+        print("⚠️ No Arduino COM port selected.")
+        return None
+
     try:
-        ser = serial.Serial("COM7", 9600, timeout=1)
+        ser = serial.Serial(selected_port, 9600, timeout=1)
         time.sleep(2)
 
         ser.reset_input_buffer()
         ser.reset_output_buffer()
 
-        print("✅ Arduino connected successfully.")
+        print(f"✅ Arduino connected successfully on {selected_port}.")
         return ser
 
     except Exception as e:
-        print(f"❌ Arduino connection failed: {e}")
+        print(f"❌ Arduino connection failed on {selected_port}: {e}")
         return None
 
 
@@ -149,8 +157,6 @@ def init_supabase():
 def load_model():
     return YOLO("bestv4.pt")
 
-
-arduino = connect_arduino()
 
 try:
     supabase = init_supabase()
@@ -165,16 +171,27 @@ except Exception as e:
 # 6. AUTHENTICATION FUNCTIONS
 # =========================================================
 
+def hash_password(password):
+    return hashlib.sha256(password.encode()).hexdigest()
+
+
 def login(username, password):
+    if not username or not password:
+        st.error("Please enter both username and password.")
+        return
+
     try:
-        response = (
-            supabase
-            .table("users")
-            .select("*")
-            .eq("username", username)
-            .eq("password", password)
-            .execute()
-        )
+        password_hash = hash_password(password)
+
+        with st.spinner("Logging in..."):
+            response = (
+                supabase
+                .table("users")
+                .select("*")
+                .eq("username", username)
+                .eq("password", password_hash)
+                .execute()
+            )
 
         if len(response.data) > 0:
             st.session_state.user = response.data[0]
@@ -182,7 +199,7 @@ def login(username, password):
             st.success("Login Successful!")
             st.rerun()
         else:
-            st.error("Invalid Username or Password")
+            st.error("Invalid username or password.")
 
     except Exception as e:
         st.error(f"Login Error: {e}")
@@ -199,15 +216,11 @@ def logout():
 # =========================================================
 
 def log_inspection(status, confidence):
-    """
-    Saves inspection result to Supabase.
-    Returns True only when save is successful.
-    """
     try:
         data = {
             "timestamp": datetime.now().isoformat(),
             "status": status,
-            "confidence_score": float(confidence),
+            "confidence_score": float(confidence) if confidence is not None else None,
             "operator_id": st.session_state.user["id"]
         }
 
@@ -228,47 +241,219 @@ def log_inspection(status, confidence):
         return False
 
 
-def update_log_display(container):
+def fetch_recent_logs(limit=5):
     try:
         response = (
             supabase
             .table("inspections")
             .select("*")
             .order("timestamp", desc=True)
-            .limit(5)
+            .limit(limit)
             .execute()
         )
+
+        return response.data
+
+    except Exception as e:
+        st.error(f"Failed to fetch recent logs: {e}")
+        return []
+
+
+def fetch_all_inspection_logs(page_size=1000):
+    all_rows = []
+    start = 0
+
+    while True:
+        end = start + page_size - 1
+
+        response = (
+            supabase
+            .table("inspections")
+            .select("*")
+            .order("timestamp", desc=True)
+            .range(start, end)
+            .execute()
+        )
+
+        rows = response.data or []
+
+        if not rows:
+            break
+
+        all_rows.extend(rows)
+
+        if len(rows) < page_size:
+            break
+
+        start += page_size
+
+    return all_rows
+
+
+def update_log_display(container):
+    logs = fetch_recent_logs(limit=5)
+
+    container.empty()
+
+    with container.container():
+        st.subheader("Recent Inspection Logs")
+
+        if logs:
+            for row in logs:
+                color = "#D6001C" if row["status"] == "Fail" else "#21c354"
+                t_stamp = pd.to_datetime(row["timestamp"]).strftime("%H:%M:%S")
+
+                st.markdown(
+                    f"""
+                    <div style="
+                        padding:10px;
+                        border-left: 5px solid {color};
+                        background-color: #1C1E26;
+                        margin-bottom: 10px;
+                        border-radius: 5px;
+                    ">
+                        <strong>{row["status"]}</strong> | Confidence: {f'{row["confidence_score"]:.2f}' if row.get("confidence_score") is not None else "N/A"}<br>
+                        <small style="color: #bbb;">🕒 {t_stamp}</small>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+        else:
+            st.info("No logs found yet.")
+
+
+def display_operator_charts(container):
+    try:
+        response = (
+            supabase
+            .table("inspections")
+            .select("*")
+            .order("timestamp", desc=True)
+            .execute()
+        )
+
+        df = pd.DataFrame(response.data)
 
         container.empty()
 
         with container.container():
-            st.subheader("Recent Logs")
+            st.subheader("Inspection Summary Charts")
 
-            if response.data:
-                for row in response.data:
-                    color = "#D6001C" if row["status"] == "Fail" else "#21c354"
-                    t_stamp = pd.to_datetime(row["timestamp"]).strftime("%H:%M:%S")
+            if df.empty:
+                st.info("No inspection data available for charts.")
+                return
 
-                    st.markdown(
-                        f"""
-                        <div style="
-                            padding:10px;
-                            border-left: 5px solid {color};
-                            background-color: #1C1E26;
-                            margin-bottom: 10px;
-                            border-radius: 5px;
-                        ">
-                            <strong>{row["status"]}</strong> | Conf: {row.get("confidence_score", 0):.2f}<br>
-                            <small style="color: #bbb;">🕒 {t_stamp}</small>
-                        </div>
-                        """,
-                        unsafe_allow_html=True
-                    )
-            else:
-                st.info("No logs found yet.")
+            status_counts = (
+                df["status"]
+                .value_counts()
+                .reset_index()
+            )
+
+            status_counts.columns = ["Status", "Count"]
+
+            chart_col1, chart_col2 = st.columns(2)
+
+            fig_bar = px.bar(
+                status_counts,
+                x="Status",
+                y="Count",
+                color="Status",
+                text="Count",
+                color_discrete_map={
+                    "Pass": "#21c354",
+                    "Fail": "#D6001C"
+                },
+                title="Pass vs Fail Count"
+            )
+
+            fig_bar.update_layout(
+                plot_bgcolor="#0E1117",
+                paper_bgcolor="#0E1117",
+                font_color="white",
+                xaxis_title="Status",
+                yaxis_title="Count",
+                showlegend=False
+            )
+
+            fig_bar.update_traces(textposition="outside")
+
+            chart_col1.plotly_chart(fig_bar, use_container_width=True)
+
+            fig_pie = px.pie(
+                status_counts,
+                names="Status",
+                values="Count",
+                color="Status",
+                color_discrete_map={
+                    "Pass": "#21c354",
+                    "Fail": "#D6001C"
+                },
+                title="Pass vs Fail Percentage",
+                hole=0.4
+            )
+
+            fig_pie.update_layout(
+                plot_bgcolor="#0E1117",
+                paper_bgcolor="#0E1117",
+                font_color="white"
+            )
+
+            chart_col2.plotly_chart(fig_pie, use_container_width=True)
 
     except Exception as e:
-        container.error(f"Sync Error: {e}")
+        container.error(f"Chart Error: {e}")
+
+
+def fetch_today_counts():
+    try:
+        today = datetime.now().date().isoformat()
+        response = (
+            supabase
+            .table("inspections")
+            .select("status")
+            .gte("timestamp", f"{today}T00:00:00")
+            .execute()
+        )
+        rows = response.data or []
+        passed = sum(1 for r in rows if r["status"] == "Pass")
+        failed = sum(1 for r in rows if r["status"] == "Fail")
+        return passed, failed
+    except Exception:
+        return 0, 0
+
+
+def show_result_card(container, status, confidence):
+    container.empty()
+
+    if status == "Pass":
+        color = "#21c354"
+        icon = "✅"
+        title = "PRODUCT PASSED"
+        message = "No defect detected"
+    else:
+        color = "#D6001C"
+        icon = "❌"
+        title = "DEFECT DETECTED"
+        message = f"Confidence: {confidence:.2f}" if confidence is not None else "Defect detected"
+
+    container.markdown(
+        f"""
+        <div style="
+            background-color: {color};
+            padding: 22px;
+            border-radius: 12px;
+            color: white;
+            text-align: center;
+            margin-bottom: 15px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.35);
+        ">
+            <div style="font-size: 42px;">{icon}</div>
+            <div style="font-size: 26px; font-weight: 800;">{title}</div>
+            <div style="font-size: 18px; margin-top: 8px;">{message}</div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
 
 
 # =========================================================
@@ -308,14 +493,44 @@ except Exception:
 st.sidebar.title(f"👤 {st.session_state.user['username']}")
 st.sidebar.caption(f"Role: {st.session_state.user.get('role', 'Operator').upper()}")
 
-menu_options = [
-    "Defect Detection",
-    "Inspection Logs",
-    "Manage Profile"
-]
+role = st.session_state.user.get("role", "operator")
 
-if st.session_state.user.get("role") == "admin":
-    menu_options.insert(2, "User Management (Admin)")
+
+# =========================================================
+# ARDUINO COM PORT SELECTION
+# =========================================================
+
+available_ports = get_available_ports()
+
+if available_ports:
+    selected_port = st.sidebar.selectbox(
+        "Arduino COM Port",
+        available_ports
+    )
+else:
+    selected_port = None
+    st.sidebar.warning("No COM ports detected.")
+
+arduino = connect_arduino(selected_port)
+
+if arduino is not None and arduino.is_open:
+    st.sidebar.success("Arduino: Connected")
+else:
+    st.sidebar.error("Arduino: Not connected")
+
+
+if role == "admin":
+    menu_options = [
+        "Defect Detection",
+        "Inspection Logs",
+        "User Management (Admin)",
+        "Manage Profile"
+    ]
+else:
+    menu_options = [
+        "Defect Detection",
+        "Manage Profile"
+    ]
 
 selected_page = st.sidebar.radio("Navigation", menu_options)
 
@@ -328,263 +543,260 @@ if st.sidebar.button("Log Out"):
 # =========================================================
 
 if selected_page == "Defect Detection":
-    st.title("🛡️ Defect Detection Interface")
+    st.title("🛡️ Defect Detection & Operator Dashboard")
 
     conf_threshold = 0.15
 
-    input_source = st.radio(
-        "Select Input Source:",
-        ["Webcam", "Upload Image"],
-        horizontal=True
-    )
+    today_counter = st.empty()
 
-    st.divider()
+    def render_today_counter(container):
+        passed, failed = fetch_today_counts()
+        total = passed + failed
+        with container.container():
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Today — Total", total)
+            m2.metric("Passed", passed)
+            m3.metric("Failed", failed)
 
-    col_main, col_logs = st.columns([2, 1])
+    render_today_counter(today_counter)
 
-    # -----------------------------------------------------
-    # WEBCAM MODE
-    # -----------------------------------------------------
-    if input_source == "Webcam":
-        with col_main:
-            st.subheader("Live Feed")
-            run_system = st.checkbox("Start Camera System", value=False)
-            frame_window = st.empty()
-            status_box = st.empty()
+    col_main, col_side = st.columns([2, 1])
 
-        log_placeholder = col_logs.empty()
-        update_log_display(log_placeholder)
+    with col_main:
+        st.subheader("Live Defect Detection")
+        run_system = st.checkbox("Start Camera System", value=False)
+        result_card = st.empty()
+        status_box = st.empty()
+        frame_window = st.empty()
 
-        if run_system:
-            cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+    with col_side:
+        log_placeholder = st.empty()
 
-            # Camera settings
-            cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 2560)
-            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1440)
+    chart_placeholder = st.empty()
 
-            if not cap.isOpened():
-                st.error("Camera could not be opened.")
-            else:
-                status_box.info("System running. Waiting for Arduino SCAN signal...")
+    update_log_display(log_placeholder)
+    display_operator_charts(chart_placeholder)
 
-            while cap.isOpened() and run_system:
-                ret, frame = cap.read()
+    if run_system:
+        cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
 
-                if not ret:
-                    st.error("Camera error.")
-                    break
+        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
-                # Prevent UI lag
-                time.sleep(0.1)
+        frame_count = 0
+        latest_display_frame = None
 
-                # Continuous preview detection
-                results = model.predict(
+        if not cap.isOpened():
+            st.error("Camera could not be opened.")
+        else:
+            status_box.info("System running. Waiting for Arduino SCAN signal...")
+
+        while cap.isOpened() and run_system:
+            ret, frame = cap.read()
+
+            if not ret:
+                st.error("Camera error.")
+                break
+
+            frame_count += 1
+
+            # =====================================================
+            # FRAME SKIPPING FOR PERFORMANCE
+            # YOLO only runs on every 3rd frame.
+            # Skipped frames show raw camera image.
+            # =====================================================
+
+            if frame_count % 3 == 0:
+                preview_results = model.predict(
                     frame,
                     conf=conf_threshold,
                     verbose=False
                 )
 
-                annotated_frame = results[0].plot()
-                frame_rgb = cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB)
-
-                frame_window.image(
-                    frame_rgb,
-                    channels="RGB",
-                    width=900
+                annotated_frame = preview_results[0].plot()
+                latest_display_frame = cv2.cvtColor(
+                    annotated_frame,
+                    cv2.COLOR_BGR2RGB
                 )
 
-                # -----------------------------------------------------
-                # HARDWARE COMMUNICATION
-                # -----------------------------------------------------
-                if arduino is not None and arduino.in_waiting > 0:
-                    try:
-                        while arduino.in_waiting > 0:
-                            raw_msg = arduino.readline()
-                            arduino_msg = raw_msg.decode(
-                                "utf-8",
-                                errors="ignore"
-                            ).strip()
+            else:
+                latest_display_frame = cv2.cvtColor(
+                    frame,
+                    cv2.COLOR_BGR2RGB
+                )
 
-                            if arduino_msg != "":
-                                print(f"📥 Received from Arduino: '{arduino_msg}'")
+            frame_window.image(
+                latest_display_frame,
+                channels="RGB",
+                use_container_width=True
+            )
 
-                            if "SCAN" in arduino_msg:
-                                print("🎯 SCAN command detected.")
-                                status_box.warning("SCAN received. Capturing inspection image...")
+            # =====================================================
+            # HARDWARE COMMUNICATION
+            # =====================================================
 
-                                # Wait for product and belt vibration to settle
-                                time.sleep(0.8)
+            if arduino is not None and arduino.in_waiting > 0:
+                try:
+                    while arduino.in_waiting > 0:
+                        raw_msg = arduino.readline()
+                        arduino_msg = raw_msg.decode(
+                            "utf-8",
+                            errors="ignore"
+                        ).strip()
 
-                                # Flush camera buffer to remove blurry frames
-                                for _ in range(10):
-                                    cap.read()
+                        if arduino_msg != "":
+                            print(f"📥 Received from Arduino: '{arduino_msg}'")
 
-                                # Capture fresh inspection image
+                        if "SCAN" in arduino_msg:
+                            print("🎯 SCAN command detected.")
+                            status_box.warning("SCAN received. Capturing inspection image...")
+
+                            time.sleep(0.8)
+
+                            for _ in range(10):
+                                cap.read()
+
+                            # =================================================
+                            # MULTI-FRAME SCAN
+                            # Capture 5 frames, run YOLO on each.
+                            # Fail if any frame detects a defect — keeps the
+                            # highest-confidence detection as the result.
+                            # =================================================
+
+                            SCAN_FRAMES = 5
+                            best_conf = None
+                            best_result = None
+                            best_frame = None
+
+                            for _ in range(SCAN_FRAMES):
                                 ret, fresh_frame = cap.read()
-
                                 if not ret:
-                                    st.error("Failed to capture inspection image.")
-                                    break
+                                    continue
 
-                                # Strict AI detection
-                                strict_conf = min(0.20, conf_threshold)
-
-                                final_results = model.predict(
+                                result = model.predict(
                                     fresh_frame,
-                                    conf=strict_conf,
+                                    conf=conf_threshold,
                                     verbose=False
                                 )
 
-                                inspected_frame = final_results[0].plot()
-                                inspected_rgb = cv2.cvtColor(
-                                    inspected_frame,
-                                    cv2.COLOR_BGR2RGB
-                                )
+                                if len(result[0].boxes) > 0:
+                                    frame_conf = float(result[0].boxes[0].conf[0])
+                                    if best_conf is None or frame_conf > best_conf:
+                                        best_conf = frame_conf
+                                        best_result = result
+                                        best_frame = fresh_frame
+                                elif best_result is None:
+                                    best_result = result
+                                    best_frame = fresh_frame
 
-                                frame_window.image(
-                                    inspected_rgb,
-                                    channels="RGB",
-                                    width=900
-                                )
-
-                                # -----------------------------------------------------
-                                # RESULT DECISION
-                                # -----------------------------------------------------
-                                if len(final_results[0].boxes) > 0:
-                                    box = final_results[0].boxes[0]
-                                    conf = float(box.conf[0])
-                                    status = "Fail"
-                                    command = b"0"
-
-                                    st.toast(f"❌ Defect Detected! ({conf:.2f})")
-                                    status_box.error(
-                                        f"Defect detected. Confidence: {conf:.2f}"
-                                    )
-
-                                else:
-                                    conf = 1.0
-                                    status = "Pass"
-                                    command = b"1"
-
-                                    st.toast("✅ Product Passed Inspection")
-                                    status_box.success("Product passed inspection.")
-
-                                # -----------------------------------------------------
-                                # IMPORTANT FIX:
-                                # SAVE TO SUPABASE FIRST, THEN MOVE MOTOR
-                                # -----------------------------------------------------
-                                print("💾 Saving inspection result to Supabase...")
-                                save_success = log_inspection(status, conf)
-
-                                if save_success:
-                                    print("✅ Data saved successfully.")
-                                    update_log_display(log_placeholder)
-
-                                    # Send command to Arduino only after successful save
-                                    if arduino is not None:
-                                        if status == "Pass":
-                                            print("📤 Sending '1' to Arduino: Forward/Pass")
-                                        else:
-                                            print("📤 Sending '0' to Arduino: Backward/Fail")
-
-                                        arduino.write(command)
-                                        arduino.flush()
-
-                                        status_box.info(
-                                            "Result saved. Motor command sent to Arduino."
-                                        )
-                                    else:
-                                        status_box.error(
-                                            "Arduino not connected. Motor command not sent."
-                                        )
-
-                                else:
-                                    print("❌ Supabase save failed. Motor command NOT sent.")
-                                    status_box.error(
-                                        "Supabase save failed. Motor command was not sent."
-                                    )
-
-                                time.sleep(0.5)
-
-                                if arduino is not None:
-                                    arduino.reset_input_buffer()
-
+                            if best_result is None:
+                                st.error("Failed to capture inspection image.")
                                 break
 
-                    except Exception as e:
-                        print(f"❌ Serial communication error: {e}")
-                        status_box.error(f"Serial communication error: {e}")
+                            final_results = best_result
 
-            cap.release()
+                            inspected_rgb = cv2.cvtColor(
+                                final_results[0].plot(),
+                                cv2.COLOR_BGR2RGB
+                            )
 
-    # -----------------------------------------------------
-    # UPLOAD IMAGE MODE
-    # -----------------------------------------------------
-    elif input_source == "Upload Image":
-        with col_main:
-            st.subheader("Static Image Analysis")
+                            frame_window.image(
+                                inspected_rgb,
+                                channels="RGB",
+                                use_container_width=True
+                            )
 
-            uploaded_file = st.file_uploader(
-                "Upload image...",
-                type=["jpg", "png", "jpeg"]
-            )
+                            # =================================================
+                            # RESULT DECISION
+                            # =================================================
 
-            if uploaded_file is not None:
-                image = Image.open(uploaded_file)
-                img_array = np.array(image)
+                            if best_conf is not None:
+                                conf = best_conf
+                                status = "Fail"
+                                command = b"0"
 
-                results = model.predict(
-                    img_array,
-                    conf=conf_threshold,
-                    verbose=False
-                )
+                                st.toast(f"❌ Defect Detected! ({conf:.2f})")
+                                status_box.error(
+                                    f"Defect detected. Confidence: {conf:.2f}"
+                                )
 
-                st.image(
-                    results[0].plot(),
-                    caption="Analyzed Image",
-                    use_container_width=True
-                )
+                            else:
+                                conf = None
+                                status = "Pass"
+                                command = b"1"
 
-                if len(results[0].boxes) > 0:
-                    box = results[0].boxes[0]
-                    conf = float(box.conf[0])
-                    status = "Fail"
-                    st.error(f"Defect detected. Confidence: {conf:.2f}")
-                else:
-                    conf = 1.0
-                    status = "Pass"
-                    st.success("No defect detected. Product passed.")
+                                st.toast("✅ Product Passed Inspection")
+                                status_box.success("Product passed inspection.")
 
-                if st.button("Save Static Image Result", type="primary"):
-                    save_success = log_inspection(status, conf)
+                            show_result_card(result_card, status, conf)
 
-                    if save_success:
-                        st.success("Static image result saved successfully.")
-                    else:
-                        st.error("Failed to save static image result.")
+                            # =================================================
+                            # SAVE TO SUPABASE FIRST, THEN MOVE MOTOR
+                            # =================================================
 
-        log_placeholder = col_logs.empty()
-        update_log_display(log_placeholder)
+                            print("💾 Saving inspection result to Supabase...")
+                            save_success = log_inspection(status, conf)
+
+                            if save_success:
+                                print("✅ Data saved successfully.")
+
+                                render_today_counter(today_counter)
+                                update_log_display(log_placeholder)
+                                display_operator_charts(chart_placeholder)
+
+                                if arduino is not None:
+                                    if status == "Pass":
+                                        print("📤 Sending '1' to Arduino: Forward/Pass")
+                                    else:
+                                        print("📤 Sending '0' to Arduino: Backward/Fail")
+
+                                    arduino.write(command)
+                                    arduino.flush()
+
+                                    status_box.info(
+                                        "Result saved. Motor command sent to Arduino."
+                                    )
+                                else:
+                                    status_box.error(
+                                        "Arduino not connected. Motor command not sent."
+                                    )
+
+                            else:
+                                print("❌ Supabase save failed. Motor command NOT sent.")
+                                status_box.error(
+                                    "Supabase save failed. Motor command was not sent."
+                                )
+
+                            time.sleep(0.5)
+
+                            if arduino is not None:
+                                arduino.reset_input_buffer()
+
+                            break
+
+                except Exception as e:
+                    print(f"❌ Serial communication error: {e}")
+                    status_box.error(f"Serial communication error: {e}")
+
+        cap.release()
 
 
 # =========================================================
-# 11. INSPECTION LOGS PAGE WITH ANALYTICS
+# 11. INSPECTION LOGS PAGE WITH ANALYTICS — ADMIN ONLY
 # =========================================================
 
 elif selected_page == "Inspection Logs":
     st.title("📋 Inspection History & Analytics")
 
-    try:
-        logs_res = (
-            supabase
-            .table("inspections")
-            .select("*")
-            .order("timestamp", desc=True)
-            .execute()
-        )
+    if role != "admin":
+        st.warning("You do not have permission to view this page.")
+        st.stop()
 
-        df_logs = pd.DataFrame(logs_res.data)
+    try:
+        logs_data = fetch_all_inspection_logs(page_size=1000)
+        df_logs = pd.DataFrame(logs_data)
 
         users_res = (
             supabase
@@ -595,10 +807,6 @@ elif selected_page == "Inspection Logs":
 
         if not df_logs.empty:
             df_logs["timestamp"] = pd.to_datetime(df_logs["timestamp"])
-
-            # =========================================================
-            # DATE RANGE FILTER
-            # =========================================================
 
             st.subheader("📅 Filter by Date")
 
@@ -620,10 +828,6 @@ elif selected_page == "Inspection Logs":
 
             df_logs = df_logs.loc[mask]
 
-            # =========================================================
-            # USERNAME MAPPING
-            # =========================================================
-
             if users_res.data:
                 user_map = {
                     user["id"]: user["username"]
@@ -640,10 +844,6 @@ elif selected_page == "Inspection Logs":
             if df_logs.empty:
                 st.warning("No inspection records found for the selected date range.")
                 st.stop()
-
-            # =========================================================
-            # SUMMARY METRICS
-            # =========================================================
 
             total_inspections = len(df_logs)
             pass_count = len(df_logs[df_logs["status"] == "Pass"])
@@ -667,17 +867,8 @@ elif selected_page == "Inspection Logs":
 
             st.divider()
 
-            # =========================================================
-            # GRAPHS
-            # =========================================================
-
             st.subheader("📈 Inspection Analytics")
 
-            chart_col1, chart_col2 = st.columns(2)
-
-            # -----------------------------
-            # PASS / FAIL BAR CHART
-            # -----------------------------
             status_counts = (
                 df_logs["status"]
                 .value_counts()
@@ -685,6 +876,8 @@ elif selected_page == "Inspection Logs":
             )
 
             status_counts.columns = ["Status", "Count"]
+
+            chart_col1, chart_col2 = st.columns(2)
 
             fig_bar = px.bar(
                 status_counts,
@@ -702,18 +895,14 @@ elif selected_page == "Inspection Logs":
             fig_bar.update_layout(
                 plot_bgcolor="#0E1117",
                 paper_bgcolor="#0E1117",
-                font_color="white"
+                font_color="white",
+                showlegend=False
             )
 
-            fig_bar.update_traces(
-                textposition="outside"
-            )
+            fig_bar.update_traces(textposition="outside")
 
             chart_col1.plotly_chart(fig_bar, use_container_width=True)
 
-            # -----------------------------
-            # PASS / FAIL PIE CHART
-            # -----------------------------
             fig_pie = px.pie(
                 status_counts,
                 names="Status",
@@ -735,71 +924,7 @@ elif selected_page == "Inspection Logs":
 
             chart_col2.plotly_chart(fig_pie, use_container_width=True)
 
-            # -----------------------------
-            # DAILY PASS / FAIL TREND
-            # -----------------------------
-            df_logs["date"] = df_logs["timestamp"].dt.date
-
-            daily_status = (
-                df_logs
-                .groupby(["date", "status"])
-                .size()
-                .reset_index(name="Count")
-            )
-
-            fig_daily = px.line(
-                daily_status,
-                x="date",
-                y="Count",
-                color="status",
-                markers=True,
-                color_discrete_map={
-                    "Pass": "#21c354",
-                    "Fail": "#D6001C"
-                },
-                title="Daily Pass/Fail Trend"
-            )
-
-            fig_daily.update_layout(
-                plot_bgcolor="#0E1117",
-                paper_bgcolor="#0E1117",
-                font_color="white",
-                xaxis_title="Date",
-                yaxis_title="Number of Inspections"
-            )
-
-            st.plotly_chart(fig_daily, use_container_width=True)
-
-            # -----------------------------
-            # CONFIDENCE SCORE DISTRIBUTION
-            # -----------------------------
-            fig_conf = px.histogram(
-                df_logs,
-                x="confidence_score",
-                color="status",
-                nbins=10,
-                color_discrete_map={
-                    "Pass": "#21c354",
-                    "Fail": "#D6001C"
-                },
-                title="Confidence Score Distribution"
-            )
-
-            fig_conf.update_layout(
-                plot_bgcolor="#0E1117",
-                paper_bgcolor="#0E1117",
-                font_color="white",
-                xaxis_title="Confidence Score",
-                yaxis_title="Frequency"
-            )
-
-            st.plotly_chart(fig_conf, use_container_width=True)
-
             st.divider()
-
-            # =========================================================
-            # FILTERED TABLE
-            # =========================================================
 
             st.subheader("🧾 Filtered Inspection Records")
 
@@ -855,10 +980,6 @@ elif selected_page == "Inspection Logs":
                 height=500
             )
 
-            # =========================================================
-            # DOWNLOAD BUTTON
-            # =========================================================
-
             csv = df_display.to_csv(index=False).encode("utf-8")
 
             st.download_button(
@@ -875,12 +996,17 @@ elif selected_page == "Inspection Logs":
     except Exception as e:
         st.error(f"Error fetching logs: {e}")
 
+
 # =========================================================
 # 12. USER MANAGEMENT PAGE
 # =========================================================
 
 elif selected_page == "User Management (Admin)":
     st.title("👥 User Management")
+
+    if role != "admin":
+        st.warning("You do not have permission to view this page.")
+        st.stop()
 
     with st.expander("➕ Add New User", expanded=False):
         with st.form("add_user_form"):
@@ -908,7 +1034,7 @@ elif selected_page == "User Management (Admin)":
                             {
                                 "username": new_user,
                                 "email": new_email,
-                                "password": new_pass,
+                                "password": hash_password(new_pass),
                                 "role": new_role
                             }
                         ).execute()
@@ -953,34 +1079,43 @@ elif selected_page == "User Management (Admin)":
                 c3.write(user.get("email", "-"))
                 c4.write(user["role"].upper())
 
-                if c5.button(
-                    "🗑️",
-                    key=f"del_user_{user['id']}",
-                    help="Delete this user"
-                ):
-                    if user["id"] == st.session_state.user["id"]:
-                        st.error("You cannot delete your own account!")
-                    else:
-                        try:
-                            supabase.table("inspections").delete().eq(
-                                "operator_id",
-                                user["id"]
-                            ).execute()
+                if st.session_state.pending_delete_user_id == user["id"]:
+                    c5.warning("Sure?")
+                    conf_col, cancel_col = st.columns(2)
+                    if conf_col.button("Yes, delete", key=f"confirm_del_{user['id']}", type="primary"):
+                        if user["id"] == st.session_state.user["id"]:
+                            st.error("You cannot delete your own account!")
+                            st.session_state.pending_delete_user_id = None
+                        else:
+                            try:
+                                supabase.table("users").delete().eq(
+                                    "id",
+                                    user["id"]
+                                ).execute()
 
-                            supabase.table("users").delete().eq(
-                                "id",
-                                user["id"]
-                            ).execute()
+                                st.session_state.pending_delete_user_id = None
+                                st.toast(f"🗑️ Deleted user: {user['username']}")
+                                time.sleep(0.5)
+                                st.rerun()
 
-                            st.toast(
-                                f"🗑️ Deleted user and their logs: {user['username']}"
-                            )
+                            except Exception as e:
+                                st.error(f"Failed to delete: {e}")
 
-                            time.sleep(0.5)
+                    if cancel_col.button("Cancel", key=f"cancel_del_{user['id']}"):
+                        st.session_state.pending_delete_user_id = None
+                        st.rerun()
+
+                else:
+                    if c5.button(
+                        "🗑️",
+                        key=f"del_user_{user['id']}",
+                        help="Delete this user"
+                    ):
+                        if user["id"] == st.session_state.user["id"]:
+                            st.error("You cannot delete your own account!")
+                        else:
+                            st.session_state.pending_delete_user_id = user["id"]
                             st.rerun()
-
-                        except Exception as e:
-                            st.error(f"Failed to delete: {e}")
 
                 st.markdown("<hr>", unsafe_allow_html=True)
 
@@ -1060,7 +1195,7 @@ elif selected_page == "Manage Profile":
             if not current_pass:
                 error_msg = "⚠️ Please enter your current password to confirm changes."
 
-            elif current_pass != user["password"]:
+            elif hash_password(current_pass) != user["password"]:
                 error_msg = "❌ Incorrect current password."
 
             elif new_pass or confirm_pass:
@@ -1081,7 +1216,7 @@ elif selected_page == "Manage Profile":
                         update_data["email"] = new_email
 
                     if new_pass:
-                        update_data["password"] = new_pass
+                        update_data["password"] = hash_password(new_pass)
 
                     if update_data:
                         (
@@ -1096,7 +1231,7 @@ elif selected_page == "Manage Profile":
                             st.session_state.user["email"] = new_email
 
                         if "password" in update_data:
-                            st.session_state.user["password"] = new_pass
+                            st.session_state.user["password"] = hash_password(new_pass)
 
                         st.success("✅ Profile updated successfully!")
                         time.sleep(1)
