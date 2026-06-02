@@ -1,0 +1,7 @@
+streamlit
+supabase
+ultralytics
+opencv-python-headless
+pandas
+plotly
+pyserial
