@@ -1,7 +1,7 @@
 streamlit
 supabase
 ultralytics
-opencv-python-headless
+opencv-python-headless==4.9.0.80
 pandas
 plotly
 pyserial
