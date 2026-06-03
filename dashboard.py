@@ -296,14 +296,14 @@ def update_log_display(container):
     container.empty()
 
     with container.container():
-        st.subheader("Recent Inspection Logs")
+        container.subheader("Recent Inspection Logs")
 
         if logs:
             for row in logs:
                 color = "#D6001C" if row["status"] == "Fail" else "#21c354"
                 t_stamp = pd.to_datetime(row["timestamp"]).strftime("%H:%M:%S")
 
-                st.markdown(
+                container.markdown(
                     f"""
                     <div style="
                         padding:10px;
@@ -319,7 +319,7 @@ def update_log_display(container):
                     unsafe_allow_html=True
                 )
         else:
-            st.info("No logs found yet.")
+            container.info("No logs found yet.")
 
 
 def display_operator_charts(container):
@@ -337,10 +337,10 @@ def display_operator_charts(container):
         container.empty()
 
         with container.container():
-            st.subheader("Inspection Summary Charts")
+            container.subheader("Inspection Summary Charts")
 
             if df.empty:
-                st.info("No inspection data available for charts.")
+                container.info("No inspection data available for charts.")
                 return
 
             status_counts = (
@@ -351,7 +351,7 @@ def display_operator_charts(container):
 
             status_counts.columns = ["Status", "Count"]
 
-            chart_col1, chart_col2 = st.columns(2)
+            chart_col1, chart_col2 = container.columns(2)
 
             fig_bar = px.bar(
                 status_counts,
