@@ -87,6 +87,18 @@ def apply_custom_styles():
                 border-color: #D6001C !important;
                 opacity: 0.5;
             }
+
+            /* Cap camera feed height so the page fits without scrolling */
+            [data-testid="stImage"] img {
+                max-height: 340px;
+                object-fit: contain;
+                width: 100%;
+            }
+
+            /* Tighten metric padding on the detection page */
+            [data-testid="stMetric"] {
+                padding: 4px 8px !important;
+            }
         </style>
         """,
         unsafe_allow_html=True
@@ -155,7 +167,7 @@ def init_supabase():
 
 @st.cache_resource
 def load_model():
-    return YOLO("bestv4.pt")
+    return YOLO("best.pt")
 
 
 try:
@@ -296,14 +308,14 @@ def update_log_display(container):
     container.empty()
 
     with container.container():
-        container.subheader("Recent Inspection Logs")
+        st.subheader("Recent Inspection Logs")
 
         if logs:
             for row in logs:
                 color = "#D6001C" if row["status"] == "Fail" else "#21c354"
                 t_stamp = pd.to_datetime(row["timestamp"]).strftime("%H:%M:%S")
 
-                container.markdown(
+                st.markdown(
                     f"""
                     <div style="
                         padding:10px;
@@ -319,7 +331,7 @@ def update_log_display(container):
                     unsafe_allow_html=True
                 )
         else:
-            container.info("No logs found yet.")
+            st.info("No logs found yet.")
 
 
 def display_operator_charts(container):
@@ -337,10 +349,10 @@ def display_operator_charts(container):
         container.empty()
 
         with container.container():
-            container.subheader("Inspection Summary Charts")
+            st.subheader("Inspection Summary Charts")
 
             if df.empty:
-                container.info("No inspection data available for charts.")
+                st.info("No inspection data available for charts.")
                 return
 
             status_counts = (
@@ -351,7 +363,7 @@ def display_operator_charts(container):
 
             status_counts.columns = ["Status", "Count"]
 
-            chart_col1, chart_col2 = container.columns(2)
+            chart_col1, chart_col2 = st.columns(2)
 
             fig_bar = px.bar(
                 status_counts,
@@ -440,16 +452,16 @@ def show_result_card(container, status, confidence):
         f"""
         <div style="
             background-color: {color};
-            padding: 22px;
-            border-radius: 12px;
+            padding: 10px 14px;
+            border-radius: 8px;
             color: white;
             text-align: center;
-            margin-bottom: 15px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.35);
+            margin-bottom: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
         ">
-            <div style="font-size: 42px;">{icon}</div>
-            <div style="font-size: 26px; font-weight: 800;">{title}</div>
-            <div style="font-size: 18px; margin-top: 8px;">{message}</div>
+            <span style="font-size: 22px;">{icon}</span>
+            <span style="font-size: 17px; font-weight: 800; margin-left: 8px;">{title}</span>
+            <span style="font-size: 13px; margin-left: 10px; opacity: 0.9;">{message}</span>
         </div>
         """,
         unsafe_allow_html=True
@@ -639,66 +651,57 @@ if selected_page == "Defect Detection":
 
             if arduino is not None and arduino.in_waiting > 0:
                 try:
-                    while arduino.in_waiting > 0:
-                        raw_msg = arduino.readline()
-                        arduino_msg = raw_msg.decode(
-                            "utf-8",
-                            errors="ignore"
-                        ).strip()
+                    raw_msg = arduino.read(arduino.in_waiting)
+                    arduino_msg = raw_msg.decode("utf-8", errors="ignore").strip()
 
-                        if arduino_msg != "":
-                            print(f"📥 Received from Arduino: '{arduino_msg}'")
+                    if arduino_msg:
+                        print(f"📥 Received from Arduino: '{arduino_msg}'")
+                        status_box.caption(f"Arduino: {arduino_msg}")
 
-                        if "SCAN" in arduino_msg:
-                            print("🎯 SCAN command detected.")
-                            status_box.warning("SCAN received. Capturing inspection image...")
+                    if "SCAN" in arduino_msg.upper():
+                        print("🎯 SCAN command detected.")
+                        status_box.warning("SCAN received. Capturing inspection image...")
 
-                            time.sleep(0.8)
+                        time.sleep(0.8)
 
-                            for _ in range(10):
-                                cap.read()
+                        for _ in range(10):
+                            cap.read()
 
-                            # =================================================
-                            # MULTI-FRAME SCAN
-                            # Capture 5 frames, run YOLO on each.
-                            # Fail if any frame detects a defect — keeps the
-                            # highest-confidence detection as the result.
-                            # =================================================
+                        # =================================================
+                        # MULTI-FRAME SCAN
+                        # Capture 5 frames, run YOLO on each.
+                        # Fail if any frame detects a defect — keeps the
+                        # highest-confidence detection as the result.
+                        # =================================================
 
-                            SCAN_FRAMES = 5
-                            best_conf = None
-                            best_result = None
-                            best_frame = None
+                        SCAN_FRAMES = 5
+                        best_conf = None
+                        best_result = None
 
-                            for _ in range(SCAN_FRAMES):
-                                ret, fresh_frame = cap.read()
-                                if not ret:
-                                    continue
+                        for _ in range(SCAN_FRAMES):
+                            ret, fresh_frame = cap.read()
+                            if not ret:
+                                continue
 
-                                result = model.predict(
-                                    fresh_frame,
-                                    conf=conf_threshold,
-                                    verbose=False
-                                )
+                            result = model.predict(
+                                fresh_frame,
+                                conf=conf_threshold,
+                                verbose=False
+                            )
 
-                                if len(result[0].boxes) > 0:
-                                    frame_conf = float(result[0].boxes[0].conf[0])
-                                    if best_conf is None or frame_conf > best_conf:
-                                        best_conf = frame_conf
-                                        best_result = result
-                                        best_frame = fresh_frame
-                                elif best_result is None:
+                            if len(result[0].boxes) > 0:
+                                frame_conf = float(result[0].boxes[0].conf[0])
+                                if best_conf is None or frame_conf > best_conf:
+                                    best_conf = frame_conf
                                     best_result = result
-                                    best_frame = fresh_frame
+                            elif best_result is None:
+                                best_result = result
 
-                            if best_result is None:
-                                st.error("Failed to capture inspection image.")
-                                break
-
-                            final_results = best_result
-
+                        if best_result is None:
+                            status_box.error("Failed to capture inspection image.")
+                        else:
                             inspected_rgb = cv2.cvtColor(
-                                final_results[0].plot(),
+                                best_result[0].plot(),
                                 cv2.COLOR_BGR2RGB
                             )
 
@@ -769,12 +772,8 @@ if selected_page == "Defect Detection":
                                     "Supabase save failed. Motor command was not sent."
                                 )
 
-                            time.sleep(0.5)
-
-                            if arduino is not None:
-                                arduino.reset_input_buffer()
-
-                            break
+                        time.sleep(0.5)
+                        arduino.reset_input_buffer()
 
                 except Exception as e:
                     print(f"❌ Serial communication error: {e}")
