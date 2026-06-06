@@ -1087,6 +1087,13 @@ elif selected_page == "User Management (Admin)":
                             st.session_state.pending_delete_user_id = None
                         else:
                             try:
+                                # Detach inspection records before deleting the
+                                # user so the FK constraint is satisfied.
+                                # Logs are preserved and show as "Unknown".
+                                supabase.table("inspections").update(
+                                    {"operator_id": None}
+                                ).eq("operator_id", user["id"]).execute()
+
                                 supabase.table("users").delete().eq(
                                     "id",
                                     user["id"]
