@@ -167,7 +167,7 @@ def init_supabase():
 
 @st.cache_resource
 def load_model():
-    return YOLO("best.pt")
+    return YOLO("bestimage.pt")
 
 
 try:
@@ -625,7 +625,6 @@ if selected_page == "Defect Detection":
             if frame_count % 3 == 0:
                 preview_results = model.predict(
                     frame,
-                    conf=conf_threshold,
                     verbose=False
                 )
 
@@ -680,6 +679,8 @@ if selected_page == "Defect Detection":
                         best_conf = None
                         best_result = None
 
+                        cls_names = None
+
                         for _ in range(SCAN_FRAMES):
                             ret, fresh_frame = cap.read()
                             if not ret:
@@ -687,12 +688,19 @@ if selected_page == "Defect Detection":
 
                             result = model.predict(
                                 fresh_frame,
-                                conf=conf_threshold,
                                 verbose=False
                             )
 
-                            if len(result[0].boxes) > 0:
-                                frame_conf = float(result[0].boxes[0].conf[0])
+                            if cls_names is None:
+                                cls_names = result[0].names
+
+                            defect_idx = next(
+                                (k for k, v in cls_names.items() if v.lower() == "defect"),
+                                None
+                            )
+
+                            if defect_idx is not None:
+                                frame_conf = float(result[0].probs.data[defect_idx])
                                 if best_conf is None or frame_conf > best_conf:
                                     best_conf = frame_conf
                                     best_result = result
@@ -717,7 +725,7 @@ if selected_page == "Defect Detection":
                             # RESULT DECISION
                             # =================================================
 
-                            if best_conf is not None:
+                            if best_conf is not None and best_conf >= conf_threshold:
                                 conf = best_conf
                                 status = "Fail"
                                 command = b"0"
