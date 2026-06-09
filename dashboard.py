@@ -336,11 +336,12 @@ def update_log_display(container):
 
 def display_operator_charts(container):
     try:
+        today = datetime.now().date().isoformat()
         response = (
             supabase
             .table("inspections")
-            .select("*")
-            .order("timestamp", desc=True)
+            .select("status")
+            .gte("timestamp", f"{today}T00:00:00")
             .execute()
         )
 
@@ -773,7 +774,8 @@ if selected_page == "Defect Detection":
                                 )
 
                         time.sleep(0.5)
-                        arduino.reset_input_buffer()
+                        if arduino is not None:
+                            arduino.reset_input_buffer()
 
                 except Exception as e:
                     print(f"❌ Serial communication error: {e}")
@@ -862,7 +864,7 @@ elif selected_page == "Inspection Logs":
             metric_col2.metric("Pass", pass_count)
             metric_col3.metric("Fail", fail_count)
             metric_col4.metric("Fail Rate", f"{fail_rate:.1f}%")
-            metric_col5.metric("Avg Confidence", f"{avg_confidence:.2f}")
+            metric_col5.metric("Avg Confidence", f"{avg_confidence:.2f}" if pd.notna(avg_confidence) else "N/A")
 
             st.divider()
 
