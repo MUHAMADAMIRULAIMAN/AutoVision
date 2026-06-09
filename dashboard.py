@@ -9,7 +9,7 @@ import pandas as pd
 import hashlib
 from ultralytics import YOLO
 from supabase import create_client
-from datetime import datetime
+from datetime import datetime, timezone
 import serial
 import serial.tools.list_ports
 import plotly.express as px
@@ -230,7 +230,7 @@ def logout():
 def log_inspection(status, confidence):
     try:
         data = {
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "status": status,
             "confidence_score": float(confidence) if confidence is not None else None,
             "operator_id": st.session_state.user["id"]
@@ -336,12 +336,12 @@ def update_log_display(container):
 
 def display_operator_charts(container):
     try:
-        today = datetime.now().date().isoformat()
+        today = datetime.now(timezone.utc).date().isoformat()
         response = (
             supabase
             .table("inspections")
             .select("status")
-            .gte("timestamp", f"{today}T00:00:00")
+            .gte("timestamp", f"{today}T00:00:00+00:00")
             .execute()
         )
 
@@ -419,12 +419,12 @@ def display_operator_charts(container):
 
 def fetch_today_counts():
     try:
-        today = datetime.now().date().isoformat()
+        today = datetime.now(timezone.utc).date().isoformat()
         response = (
             supabase
             .table("inspections")
             .select("status")
-            .gte("timestamp", f"{today}T00:00:00")
+            .gte("timestamp", f"{today}T00:00:00+00:00")
             .execute()
         )
         rows = response.data or []
@@ -750,7 +750,7 @@ if selected_page == "Defect Detection":
                                 update_log_display(log_placeholder)
                                 display_operator_charts(chart_placeholder)
 
-                                if arduino is not None:
+                                if arduino is not None and arduino.is_open:
                                     if status == "Pass":
                                         print("📤 Sending '1' to Arduino: Forward/Pass")
                                     else:
