@@ -606,7 +606,8 @@ if selected_page == "Defect Detection":
         else:
             status_box.info("System running. Waiting for Arduino SCAN signal...")
 
-        while cap.isOpened() and run_system:
+        try:
+         while cap.isOpened() and run_system:
             ret, frame = cap.read()
 
             if not ret:
@@ -781,7 +782,8 @@ if selected_page == "Defect Detection":
                     print(f"❌ Serial communication error: {e}")
                     status_box.error(f"Serial communication error: {e}")
 
-        cap.release()
+        finally:
+            cap.release()
 
 
 # =========================================================
