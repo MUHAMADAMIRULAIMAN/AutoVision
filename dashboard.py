@@ -30,7 +30,7 @@ st.set_page_config(
 # 2. CUSTOM STYLES
 # =========================================================
 
-LOGO_PATH = "DRB_HICOM_Logo.png"
+LOGO_PATH = "DRB_HiCOM_Logo.png"
 
 
 def apply_custom_styles():
