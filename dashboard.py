@@ -36,7 +36,10 @@ LOGO_PATH = "DRB_HiCOM_Logo.png"
 
 def to_myt(ts_str):
     """Convert a UTC ISO timestamp string to Malaysia Time (UTC+8)."""
-    return pd.to_datetime(ts_str).tz_localize("UTC").tz_convert("Asia/Kuala_Lumpur")
+    ts = pd.to_datetime(ts_str)
+    if ts.tzinfo is None:
+        ts = ts.tz_localize("UTC")
+    return ts.tz_convert("Asia/Kuala_Lumpur")
 
 
 def apply_custom_styles():
@@ -917,7 +920,7 @@ elif selected_page == "Inspection Logs":
         )
 
         if not df_logs.empty:
-            df_logs["timestamp"] = pd.to_datetime(df_logs["timestamp"]).dt.tz_localize("UTC").dt.tz_convert("Asia/Kuala_Lumpur")
+            df_logs["timestamp"] = pd.to_datetime(df_logs["timestamp"], utc=True).dt.tz_convert("Asia/Kuala_Lumpur")
 
             st.subheader("📅 Filter by Date")
 
