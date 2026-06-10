@@ -108,6 +108,72 @@ def apply_custom_styles():
             [data-testid="stMetric"] {
                 padding: 4px 8px !important;
             }
+
+            /* ── Animations ── */
+            @keyframes fadeIn {
+                from { opacity: 0; transform: translateY(8px); }
+                to   { opacity: 1; transform: translateY(0); }
+            }
+            @keyframes slideInLeft {
+                from { opacity: 0; transform: translateX(-16px); }
+                to   { opacity: 1; transform: translateX(0); }
+            }
+            @keyframes pulseRed {
+                0%   { box-shadow: 0 0 0 0 rgba(214,0,28,0.6); }
+                70%  { box-shadow: 0 0 0 12px rgba(214,0,28,0); }
+                100% { box-shadow: 0 0 0 0 rgba(214,0,28,0); }
+            }
+            @keyframes pulseGreen {
+                0%   { box-shadow: 0 0 0 0 rgba(33,195,84,0.5); }
+                70%  { box-shadow: 0 0 0 12px rgba(33,195,84,0); }
+                100% { box-shadow: 0 0 0 0 rgba(33,195,84,0); }
+            }
+
+            /* Page fade-in on navigation */
+            section[data-testid="stMain"] > div:first-child {
+                animation: fadeIn 0.35s ease-out;
+            }
+
+            /* Metric cards slide in */
+            [data-testid="stMetric"] {
+                animation: slideInLeft 0.3s ease-out;
+                transition: transform 0.2s ease, box-shadow 0.2s ease;
+            }
+            [data-testid="stMetric"]:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            }
+
+            /* Buttons smooth transition */
+            div.stButton > button {
+                transition: background-color 0.2s ease,
+                            border-color 0.2s ease,
+                            transform 0.15s ease,
+                            box-shadow 0.15s ease !important;
+            }
+            div.stButton > button:hover {
+                transform: translateY(-1px) !important;
+                box-shadow: 0 4px 10px rgba(0,0,0,0.25) !important;
+            }
+
+            /* Sidebar items fade */
+            [data-testid="stSidebar"] .stRadio,
+            [data-testid="stSidebar"] .stSelectbox {
+                animation: fadeIn 0.4s ease-out;
+            }
+
+            /* Dataframe fade */
+            [data-testid="stDataFrame"] {
+                animation: fadeIn 0.4s ease-out;
+            }
+
+            /* Result card pulse classes */
+            .result-fail {
+                animation: pulseRed 0.9s ease-out 2;
+            }
+            .result-pass {
+                animation: pulseGreen 0.9s ease-out 1;
+            }
         </style>
         """,
         unsafe_allow_html=True
@@ -143,6 +209,15 @@ if "trend_data" not in st.session_state:
 
 if "camera_active" not in st.session_state:
     st.session_state.camera_active = False
+
+if "session_passed" not in st.session_state:
+    st.session_state.session_passed = 0
+
+if "session_failed" not in st.session_state:
+    st.session_state.session_failed = 0
+
+if "show_session_summary" not in st.session_state:
+    st.session_state.show_session_summary = False
 
 
 # =========================================================
@@ -457,16 +532,18 @@ def show_result_card(container, status, confidence):
         color = "#21c354"
         icon = "✅"
         title = "PRODUCT PASSED"
-        message = "No defect detected"
+        message = f"OK confidence: {confidence:.2f}" if confidence is not None else "No defect detected"
+        css_class = "result-pass"
     else:
         color = "#D6001C"
         icon = "❌"
         title = "DEFECT DETECTED"
-        message = f"Confidence: {confidence:.2f}" if confidence is not None else "Defect detected"
+        message = f"Defect confidence: {confidence:.2f}" if confidence is not None else "Defect detected"
+        css_class = "result-fail"
 
     container.markdown(
         f"""
-        <div style="
+        <div class="{css_class}" style="
             background-color: {color};
             padding: 10px 14px;
             border-radius: 8px;
@@ -505,7 +582,24 @@ def render_trend(container):
     container.empty()
     with container.container():
         if len(data) < 2:
-            st.info("Waiting for inspections to build trend...")
+            st.markdown(
+                """
+                <div style="
+                    text-align:center;
+                    padding: 24px 12px;
+                    border: 1px dashed #00205B;
+                    border-radius: 8px;
+                    color: #888;
+                    animation: fadeIn 0.4s ease-out;
+                ">
+                    <div style="font-size:28px;">📈</div>
+                    <div style="font-size:13px; margin-top:6px;">
+                        Trend will appear after<br>2+ inspections
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
             return
         df = pd.DataFrame(data)
         df["defect"] = (df["status"] == "Fail").astype(int)
@@ -632,6 +726,18 @@ else:
 
 selected_page = st.sidebar.radio("Navigation", menu_options)
 
+_page_titles = {
+    "Defect Detection": "Defect Detection",
+    "Inspection Logs": "Inspection Logs",
+    "User Management (Admin)": "User Management",
+    "Manage Profile": "My Profile",
+}
+_title = _page_titles.get(selected_page, selected_page)
+st.markdown(
+    f"<script>document.title = '{_title} | DRB-HICOM'</script>",
+    unsafe_allow_html=True
+)
+
 if st.sidebar.button("Log Out"):
     logout()
 
@@ -690,6 +796,9 @@ if selected_page == "Defect Detection":
             st.session_state.camera_active = False
         else:
             st.session_state.camera_active = True
+            st.session_state.session_passed = 0
+            st.session_state.session_failed = 0
+            st.session_state.show_session_summary = False
             status_box.info("System running. Waiting for Arduino SCAN signal...")
 
         try:
@@ -852,6 +961,11 @@ if selected_page == "Defect Detection":
                             if save_success:
                                 print("✅ Data saved successfully.")
 
+                                if status == "Pass":
+                                    st.session_state.session_passed += 1
+                                else:
+                                    st.session_state.session_failed += 1
+
                                 st.session_state.trend_data.append({"status": status})
                                 if len(st.session_state.trend_data) > 50:
                                     st.session_state.trend_data = st.session_state.trend_data[-50:]
@@ -894,7 +1008,39 @@ if selected_page == "Defect Detection":
         finally:
             cap.release()
             st.session_state.camera_active = False
+            total_session = st.session_state.session_passed + st.session_state.session_failed
+            if total_session > 0:
+                st.session_state.show_session_summary = True
 
+    if st.session_state.get("show_session_summary", False) and not run_system:
+        sp = st.session_state.session_passed
+        sf = st.session_state.session_failed
+        st_total = sp + sf
+        rate = (sf / st_total * 100) if st_total > 0 else 0.0
+        st.markdown(
+            f"""
+            <div style="
+                background: linear-gradient(135deg, #00153B, #00205B);
+                border: 1px solid #D6001C;
+                border-radius: 10px;
+                padding: 16px 20px;
+                margin-top: 12px;
+                animation: fadeIn 0.5s ease-out;
+                color: white;
+            ">
+                <div style="font-size:15px; font-weight:700; margin-bottom:10px;">
+                    📊 Session Summary
+                </div>
+                <div style="display:flex; gap:32px; font-size:14px;">
+                    <span>🔢 Total: <strong>{st_total}</strong></span>
+                    <span style="color:#21c354;">✅ Passed: <strong>{sp}</strong></span>
+                    <span style="color:#D6001C;">❌ Failed: <strong>{sf}</strong></span>
+                    <span>📉 Fail Rate: <strong>{rate:.1f}%</strong></span>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
 
 
 # =========================================================
@@ -902,7 +1048,10 @@ if selected_page == "Defect Detection":
 # =========================================================
 
 elif selected_page == "Inspection Logs":
-    st.title("📋 Inspection History & Analytics")
+    title_col, btn_col = st.columns([5, 1])
+    title_col.title("📋 Inspection History & Analytics")
+    if btn_col.button("🔄 Refresh", use_container_width=True):
+        st.rerun()
 
     if role != "admin":
         st.warning("You do not have permission to view this page.")
