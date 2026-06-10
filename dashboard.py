@@ -617,7 +617,6 @@ st.sidebar.markdown(
 if role == "admin":
     menu_options = [
         "Defect Detection",
-        "Live Dashboard",
         "Inspection Logs",
         "User Management (Admin)",
         "Manage Profile"
@@ -625,7 +624,6 @@ if role == "admin":
 else:
     menu_options = [
         "Defect Detection",
-        "Live Dashboard",
         "Manage Profile"
     ]
 
@@ -667,11 +665,8 @@ if selected_page == "Defect Detection":
         frame_window = st.empty()
 
     with col_side:
-        tab_logs, tab_trend = st.tabs(["📋 Recent Logs", "📈 Defect Trend"])
-        with tab_logs:
-            log_placeholder = st.empty()
-        with tab_trend:
-            trend_placeholder = st.empty()
+        log_placeholder = st.empty()
+        trend_placeholder = st.empty()
 
     update_log_display(log_placeholder)
     render_trend(trend_placeholder)
@@ -897,120 +892,6 @@ if selected_page == "Defect Detection":
             cap.release()
             st.session_state.camera_active = False
 
-
-# =========================================================
-# 11. LIVE DASHBOARD PAGE — ALL ROLES
-# =========================================================
-
-elif selected_page == "Live Dashboard":
-    st.title("📡 Live Production Dashboard")
-    st.caption("Real-time view of today's production line — read only")
-
-    try:
-        passed, failed = fetch_today_counts()
-        total = passed + failed
-        fail_rate = (failed / total * 100) if total > 0 else 0.0
-
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Today — Total", total)
-        m2.metric("✅ Passed", passed)
-        m3.metric("❌ Failed", failed)
-        m4.metric("Fail Rate", f"{fail_rate:.1f}%")
-
-        st.divider()
-
-        today = datetime.now(timezone.utc).date().isoformat()
-        response = (
-            supabase
-            .table("inspections")
-            .select("*")
-            .gte("timestamp", f"{today}T00:00:00+00:00")
-            .order("timestamp", desc=False)
-            .execute()
-        )
-        df_live = pd.DataFrame(response.data or [])
-
-        if not df_live.empty:
-            df_live["timestamp"] = pd.to_datetime(df_live["timestamp"]).dt.tz_localize("UTC").dt.tz_convert("Asia/Kuala_Lumpur")
-
-            chart_col1, chart_col2 = st.columns(2)
-
-            status_counts = df_live["status"].value_counts().reset_index()
-            status_counts.columns = ["Status", "Count"]
-
-            fig_pie = px.pie(
-                status_counts,
-                names="Status",
-                values="Count",
-                color="Status",
-                color_discrete_map={"Pass": "#21c354", "Fail": "#D6001C"},
-                title="Today's Pass / Fail Split",
-                hole=0.4
-            )
-            fig_pie.update_layout(
-                plot_bgcolor="#0E1117",
-                paper_bgcolor="#0E1117",
-                font_color="white"
-            )
-            chart_col1.plotly_chart(fig_pie, use_container_width=True)
-
-            df_live["minute"] = df_live["timestamp"].dt.floor("5min")
-            timeline = (
-                df_live.groupby(["minute", "status"])
-                .size()
-                .reset_index(name="count")
-            )
-            fig_timeline = px.bar(
-                timeline,
-                x="minute",
-                y="count",
-                color="status",
-                color_discrete_map={"Pass": "#21c354", "Fail": "#D6001C"},
-                title="Inspections Over Time (5-min intervals)",
-                labels={"minute": "Time", "count": "Count"}
-            )
-            fig_timeline.update_layout(
-                plot_bgcolor="#0E1117",
-                paper_bgcolor="#0E1117",
-                font_color="white",
-                showlegend=True
-            )
-            chart_col2.plotly_chart(fig_timeline, use_container_width=True)
-
-            st.divider()
-            st.subheader("🕒 Last 10 Inspections")
-            recent = df_live.tail(10)[["timestamp", "status", "confidence_score"]].copy()
-            recent["timestamp"] = recent["timestamp"].dt.tz_localize("UTC").dt.tz_convert("Asia/Kuala_Lumpur").dt.strftime("%H:%M:%S")
-            recent = recent.iloc[::-1].reset_index(drop=True)
-
-            def highlight(val):
-                if val == "Fail":
-                    return "color: #ff4b4b; font-weight: bold"
-                if val == "Pass":
-                    return "color: #21c354; font-weight: bold"
-                return ""
-
-            st.dataframe(
-                recent.style.map(highlight, subset=["status"]),
-                use_container_width=True,
-                hide_index=True
-            )
-
-        else:
-            st.info("No inspections recorded today yet.")
-
-        st.divider()
-        st.subheader("🖥️ System Health")
-        h1, h2, h3, h4 = st.columns(4)
-        cam_ok = st.session_state.get("camera_active", False)
-        arduino_status = arduino is not None and arduino.is_open
-        h1.metric("Camera", "🟢 Active" if cam_ok else "🔴 Inactive")
-        h2.metric("Arduino", "🟢 Connected" if arduino_status else "🔴 Disconnected")
-        h3.metric("Database", "🟢 Online" if db_ok else "🔴 Offline")
-        h4.metric("AI Model", "🟢 Loaded" if model is not None else "🔴 Not loaded")
-
-    except Exception as e:
-        st.error(f"Dashboard error: {e}")
 
 
 # =========================================================
