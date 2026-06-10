@@ -6,6 +6,7 @@ import streamlit as st
 import cv2
 import time
 import pandas as pd
+import numpy as np
 import hashlib
 from ultralytics import YOLO
 from supabase import create_client
@@ -13,6 +14,7 @@ from datetime import datetime, timezone
 import serial
 import serial.tools.list_ports
 import plotly.express as px
+import plotly.graph_objects as go
 
 
 # =========================================================
@@ -128,6 +130,12 @@ if "logged_in" not in st.session_state:
 
 if "pending_delete_user_id" not in st.session_state:
     st.session_state.pending_delete_user_id = None
+
+if "trend_data" not in st.session_state:
+    st.session_state.trend_data = []
+
+if "camera_active" not in st.session_state:
+    st.session_state.camera_active = False
 
 
 # =========================================================
@@ -469,6 +477,62 @@ def show_result_card(container, status, confidence):
     )
 
 
+def create_confidence_overlay(frame_rgb, confidence, is_defect):
+    h, w = frame_rgb.shape[:2]
+    Y, X = np.ogrid[:h, :w]
+    cx, cy = w // 2, h // 2
+    dist = np.sqrt((X - cx) ** 2 + (Y - cy) ** 2)
+    max_dist = np.sqrt(cx ** 2 + cy ** 2)
+    mask = (1 - dist / max_dist) * confidence
+    mask = np.clip(mask * 255, 0, 255).astype(np.uint8)
+    color_overlay = np.zeros_like(frame_rgb)
+    if is_defect:
+        color_overlay[:, :, 0] = mask  # Red channel
+    else:
+        color_overlay[:, :, 1] = mask  # Green channel
+    return cv2.addWeighted(frame_rgb, 0.75, color_overlay, 0.25, 0)
+
+
+def render_trend(container):
+    data = st.session_state.trend_data
+    container.empty()
+    with container.container():
+        if len(data) < 2:
+            st.info("Waiting for inspections to build trend...")
+            return
+        df = pd.DataFrame(data)
+        df["defect"] = (df["status"] == "Fail").astype(int)
+        df["defect_rate"] = df["defect"].expanding().mean() * 100
+        df["#"] = range(1, len(df) + 1)
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=df["#"], y=df["defect_rate"],
+            mode="lines+markers",
+            line=dict(color="#D6001C", width=2),
+            marker=dict(size=5),
+            name="Defect Rate"
+        ))
+        fig.add_hline(
+            y=10, line_dash="dash",
+            line_color="#FFD700",
+            annotation_text="10% limit",
+            annotation_font_color="#FFD700"
+        )
+        fig.update_layout(
+            title="Live Defect Rate Trend",
+            xaxis_title="Inspection #",
+            yaxis_title="Defect Rate (%)",
+            yaxis=dict(range=[0, 100]),
+            plot_bgcolor="#0E1117",
+            paper_bgcolor="#0E1117",
+            font_color="white",
+            height=260,
+            margin=dict(l=0, r=0, t=35, b=0),
+            showlegend=False
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+
 # =========================================================
 # 8. LOGIN SCREEN
 # =========================================================
@@ -526,15 +590,30 @@ else:
 
 arduino = connect_arduino(selected_port)
 
-if arduino is not None and arduino.is_open:
-    st.sidebar.success("Arduino: Connected")
-else:
-    st.sidebar.error("Arduino: Not connected")
+st.sidebar.markdown("---")
+st.sidebar.subheader("🖥️ System Health")
+
+cam_ok = st.session_state.get("camera_active", False)
+arduino_ok = arduino is not None and arduino.is_open
+model_ok = model is not None
+try:
+    supabase.table("inspections").select("id").limit(1).execute()
+    db_ok = True
+except Exception:
+    db_ok = False
+
+st.sidebar.markdown(
+    f"{'🟢' if cam_ok else '🔴'} **Camera:** {'Active' if cam_ok else 'Inactive'}\n\n"
+    f"{'🟢' if arduino_ok else '🔴'} **Arduino:** {'Connected' if arduino_ok else 'Disconnected'}\n\n"
+    f"{'🟢' if db_ok else '🔴'} **Database:** {'Online' if db_ok else 'Offline'}\n\n"
+    f"{'🟢' if model_ok else '🔴'} **AI Model:** {'Loaded' if model_ok else 'Not loaded'}"
+)
 
 
 if role == "admin":
     menu_options = [
         "Defect Detection",
+        "Live Dashboard",
         "Inspection Logs",
         "User Management (Admin)",
         "Manage Profile"
@@ -542,6 +621,7 @@ if role == "admin":
 else:
     menu_options = [
         "Defect Detection",
+        "Live Dashboard",
         "Manage Profile"
     ]
 
@@ -583,12 +663,14 @@ if selected_page == "Defect Detection":
         frame_window = st.empty()
 
     with col_side:
-        log_placeholder = st.empty()
-
-    chart_placeholder = st.empty()
+        tab_logs, tab_trend = st.tabs(["📋 Recent Logs", "📈 Defect Trend"])
+        with tab_logs:
+            log_placeholder = st.empty()
+        with tab_trend:
+            trend_placeholder = st.empty()
 
     update_log_display(log_placeholder)
-    display_operator_charts(chart_placeholder)
+    render_trend(trend_placeholder)
 
     if run_system:
         cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
@@ -603,7 +685,9 @@ if selected_page == "Defect Detection":
 
         if not cap.isOpened():
             st.error("Camera could not be opened.")
+            st.session_state.camera_active = False
         else:
+            st.session_state.camera_active = True
             status_box.info("System running. Waiting for Arduino SCAN signal...")
 
         try:
@@ -710,17 +794,6 @@ if selected_page == "Defect Detection":
                         if best_result is None:
                             status_box.error("Failed to capture inspection image.")
                         else:
-                            inspected_rgb = cv2.cvtColor(
-                                best_result[0].plot(),
-                                cv2.COLOR_BGR2RGB
-                            )
-
-                            frame_window.image(
-                                inspected_rgb,
-                                channels="RGB",
-                                use_container_width=True
-                            )
-
                             # =================================================
                             # RESULT DECISION
                             # =================================================
@@ -736,14 +809,36 @@ if selected_page == "Defect Detection":
                                 )
 
                             else:
-                                conf = None
+                                conf = best_conf if best_conf is not None else 0.0
                                 status = "Pass"
                                 command = b"1"
 
                                 st.toast("✅ Product Passed Inspection")
                                 status_box.success("Product passed inspection.")
 
-                            show_result_card(result_card, status, conf)
+                            # =================================================
+                            # HEATMAP OVERLAY
+                            # =================================================
+
+                            inspected_rgb = cv2.cvtColor(
+                                best_result[0].plot(),
+                                cv2.COLOR_BGR2RGB
+                            )
+
+                            heatmap_conf = conf if conf is not None else 0.0
+                            inspected_rgb = create_confidence_overlay(
+                                inspected_rgb,
+                                heatmap_conf,
+                                is_defect=(status == "Fail")
+                            )
+
+                            frame_window.image(
+                                inspected_rgb,
+                                channels="RGB",
+                                use_container_width=True
+                            )
+
+                            show_result_card(result_card, status, conf if status == "Fail" else None)
 
                             # =================================================
                             # SAVE TO SUPABASE FIRST, THEN MOVE MOTOR
@@ -755,9 +850,13 @@ if selected_page == "Defect Detection":
                             if save_success:
                                 print("✅ Data saved successfully.")
 
+                                st.session_state.trend_data.append({"status": status})
+                                if len(st.session_state.trend_data) > 50:
+                                    st.session_state.trend_data = st.session_state.trend_data[-50:]
+
                                 render_today_counter(today_counter)
                                 update_log_display(log_placeholder)
-                                display_operator_charts(chart_placeholder)
+                                render_trend(trend_placeholder)
 
                                 if arduino is not None and arduino.is_open:
                                     if status == "Pass":
@@ -792,10 +891,126 @@ if selected_page == "Defect Detection":
 
         finally:
             cap.release()
+            st.session_state.camera_active = False
 
 
 # =========================================================
-# 11. INSPECTION LOGS PAGE WITH ANALYTICS — ADMIN ONLY
+# 11. LIVE DASHBOARD PAGE — ALL ROLES
+# =========================================================
+
+elif selected_page == "Live Dashboard":
+    st.title("📡 Live Production Dashboard")
+    st.caption("Real-time view of today's production line — read only")
+
+    try:
+        passed, failed = fetch_today_counts()
+        total = passed + failed
+        fail_rate = (failed / total * 100) if total > 0 else 0.0
+
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Today — Total", total)
+        m2.metric("✅ Passed", passed)
+        m3.metric("❌ Failed", failed)
+        m4.metric("Fail Rate", f"{fail_rate:.1f}%")
+
+        st.divider()
+
+        today = datetime.now(timezone.utc).date().isoformat()
+        response = (
+            supabase
+            .table("inspections")
+            .select("*")
+            .gte("timestamp", f"{today}T00:00:00+00:00")
+            .order("timestamp", desc=False)
+            .execute()
+        )
+        df_live = pd.DataFrame(response.data or [])
+
+        if not df_live.empty:
+            df_live["timestamp"] = pd.to_datetime(df_live["timestamp"])
+
+            chart_col1, chart_col2 = st.columns(2)
+
+            status_counts = df_live["status"].value_counts().reset_index()
+            status_counts.columns = ["Status", "Count"]
+
+            fig_pie = px.pie(
+                status_counts,
+                names="Status",
+                values="Count",
+                color="Status",
+                color_discrete_map={"Pass": "#21c354", "Fail": "#D6001C"},
+                title="Today's Pass / Fail Split",
+                hole=0.4
+            )
+            fig_pie.update_layout(
+                plot_bgcolor="#0E1117",
+                paper_bgcolor="#0E1117",
+                font_color="white"
+            )
+            chart_col1.plotly_chart(fig_pie, use_container_width=True)
+
+            df_live["minute"] = df_live["timestamp"].dt.floor("5min")
+            timeline = (
+                df_live.groupby(["minute", "status"])
+                .size()
+                .reset_index(name="count")
+            )
+            fig_timeline = px.bar(
+                timeline,
+                x="minute",
+                y="count",
+                color="status",
+                color_discrete_map={"Pass": "#21c354", "Fail": "#D6001C"},
+                title="Inspections Over Time (5-min intervals)",
+                labels={"minute": "Time", "count": "Count"}
+            )
+            fig_timeline.update_layout(
+                plot_bgcolor="#0E1117",
+                paper_bgcolor="#0E1117",
+                font_color="white",
+                showlegend=True
+            )
+            chart_col2.plotly_chart(fig_timeline, use_container_width=True)
+
+            st.divider()
+            st.subheader("🕒 Last 10 Inspections")
+            recent = df_live.tail(10)[["timestamp", "status", "confidence_score"]].copy()
+            recent["timestamp"] = recent["timestamp"].dt.strftime("%H:%M:%S")
+            recent = recent.iloc[::-1].reset_index(drop=True)
+
+            def highlight(val):
+                if val == "Fail":
+                    return "color: #ff4b4b; font-weight: bold"
+                if val == "Pass":
+                    return "color: #21c354; font-weight: bold"
+                return ""
+
+            st.dataframe(
+                recent.style.map(highlight, subset=["status"]),
+                use_container_width=True,
+                hide_index=True
+            )
+
+        else:
+            st.info("No inspections recorded today yet.")
+
+        st.divider()
+        st.subheader("🖥️ System Health")
+        h1, h2, h3, h4 = st.columns(4)
+        cam_ok = st.session_state.get("camera_active", False)
+        arduino_status = arduino is not None and arduino.is_open
+        h1.metric("Camera", "🟢 Active" if cam_ok else "🔴 Inactive")
+        h2.metric("Arduino", "🟢 Connected" if arduino_status else "🔴 Disconnected")
+        h3.metric("Database", "🟢 Online" if db_ok else "🔴 Offline")
+        h4.metric("AI Model", "🟢 Loaded" if model is not None else "🔴 Not loaded")
+
+    except Exception as e:
+        st.error(f"Dashboard error: {e}")
+
+
+# =========================================================
+# 12. INSPECTION LOGS PAGE WITH ANALYTICS — ADMIN ONLY
 # =========================================================
 
 elif selected_page == "Inspection Logs":
