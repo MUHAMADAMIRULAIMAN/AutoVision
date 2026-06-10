@@ -34,6 +34,10 @@ st.set_page_config(
 
 LOGO_PATH = "DRB_HiCOM_Logo.png"
 
+def to_myt(ts_str):
+    """Convert a UTC ISO timestamp string to Malaysia Time (UTC+8)."""
+    return pd.to_datetime(ts_str).tz_localize("UTC").tz_convert("Asia/Kuala_Lumpur")
+
 
 def apply_custom_styles():
     st.markdown(
@@ -321,7 +325,7 @@ def update_log_display(container):
         if logs:
             for row in logs:
                 color = "#D6001C" if row["status"] == "Fail" else "#21c354"
-                t_stamp = pd.to_datetime(row["timestamp"]).strftime("%H:%M:%S")
+                t_stamp = to_myt(row["timestamp"]).strftime("%H:%M:%S")
 
                 st.markdown(
                     f"""
@@ -927,7 +931,7 @@ elif selected_page == "Live Dashboard":
         df_live = pd.DataFrame(response.data or [])
 
         if not df_live.empty:
-            df_live["timestamp"] = pd.to_datetime(df_live["timestamp"])
+            df_live["timestamp"] = pd.to_datetime(df_live["timestamp"]).dt.tz_localize("UTC").dt.tz_convert("Asia/Kuala_Lumpur")
 
             chart_col1, chart_col2 = st.columns(2)
 
@@ -976,7 +980,7 @@ elif selected_page == "Live Dashboard":
             st.divider()
             st.subheader("🕒 Last 10 Inspections")
             recent = df_live.tail(10)[["timestamp", "status", "confidence_score"]].copy()
-            recent["timestamp"] = recent["timestamp"].dt.strftime("%H:%M:%S")
+            recent["timestamp"] = recent["timestamp"].dt.tz_localize("UTC").dt.tz_convert("Asia/Kuala_Lumpur").dt.strftime("%H:%M:%S")
             recent = recent.iloc[::-1].reset_index(drop=True)
 
             def highlight(val):
@@ -1032,7 +1036,7 @@ elif selected_page == "Inspection Logs":
         )
 
         if not df_logs.empty:
-            df_logs["timestamp"] = pd.to_datetime(df_logs["timestamp"])
+            df_logs["timestamp"] = pd.to_datetime(df_logs["timestamp"]).dt.tz_localize("UTC").dt.tz_convert("Asia/Kuala_Lumpur")
 
             st.subheader("📅 Filter by Date")
 
@@ -1171,7 +1175,7 @@ elif selected_page == "Inspection Logs":
 
             df_display["timestamp"] = (
                 df_display["timestamp"]
-                .dt.strftime("%Y-%m-%d %H:%M:%S")
+                .dt.strftime("%Y-%m-%d %H:%M:%S MYT")
             )
 
             col_f1, _ = st.columns(2)
