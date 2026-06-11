@@ -1,0 +1,466 @@
+--- PAGE 30 ---
+Phase Key Activities Deliverables
+over a Flask + MySQL stack. Map the data diagrams,
+flow. hardware
+specification list.
+System Design Design the layered architecture. Build the System
+ERD for Supabase. Wireframe the operator architecture
+and admin interfaces. diagram, ERD,
+UI wireframes.
+Implementation Train the YOLOv8 model on the brake disc Trained AI model
+dataset. Build the Streamlit dashboard. (bestv4.pt),
+Write the Arduino sketch and the PySerial Streamlit app
+handshake. (dashboard.py),
+Arduino
+firmware.
+Testing & Review Run unit tests on each module. Run full- Test reports,
+loop integration tests with IR trigger, accuracy metrics,
+camera, AI, motor and Supabase. Tune list of fixes for
+confidence threshold based on test results. the next iteration.
+3.2.1 Planning and Requirement Phase
+The first iteration started with a planning phase aimed at understanding the day-to-day
+operations at HICOM Diecastings. Through observations and a short interview with
+the Head of Department, it became clear that the existing inspection process was prone
+to fatigue-driven errors and had almost no centralised data tracking.
+From these findings, three core requirements were locked in: the system had to
+capture brake disc images in real time, automate sorting via a conveyor, and log every
+inspection event to a centralised database for later analysis. The decision to use
+Streamlit and Supabase was also made at this stage, mainly because both can be set up
+by a single developer without dedicated infrastructure.
+19
+
+--- PAGE 31 ---
+3.2.2 Analysis and Design Phase
+The analysis and design phase bridged the gap between the high-level requirements
+and the actual implementation. A modular architecture was drawn up where a central
+Python script (dashboard.py) acts as the controller, mediating between the webcam,
+the YOLOv8 model, the Arduino serial port and Supabase. The database schema was
+designed around two tables: 'users' for credentials and roles, and 'inspections' for every
+Pass/Fail event.
+The dashboard layout was wireframed with operational clarity in mind. The
+operator console uses a split-view: a large live video panel on the left and a high-
+contrast status card on the right, so a defect alert is impossible to miss from a few
+metres away. The admin Inspection Logs page was wireframed with date filters, metric
+cards and Plotly charts so management can review past production without writing
+SQL.and receive instant defect alerts without navigating through complex menus.
+3.2.3 Implementation Phase (Iterative Development)
+The implementation phase was where most of the technical work happened,
+and it was split into three iterations. The first iteration focused on the AI core: the
+YOLOv8 model was trained on a brake disc dataset annotated through Roboflow,
+exported as bestv4.pt, and loaded inside a stripped-down Python script to confirm it
+could classify samples reliably.
+The second iteration brought in Streamlit and Supabase. The login page,
+sidebar navigation, defect detection page, profile page, inspection logs page and user
+management page were all wired up to the Supabase client. SHA-256 password
+hashing was added in the same iteration. This was also the point where the streaming
+layout was tuned: YOLOv8 only runs on every third frame during normal preview,
+which keeps the UI smooth without dro
+
+--- PAGE 32 ---
+unplugged. This iteration is also where the multi-frame capture logic was introduced:
+after receiving SCAN, the backend flushes 10 frames from the webcam buffer (to clear
+motion blur and stale frames), captures 5 fresh frames, runs YOLOv8 on each, and
+keeps the highest-confidence result.
+Following the completion of the third iteration, the dashboard was deployed to
+Streamlit Community Cloud for remote access. The application repository was hosted
+on GitHub, with Supabase credentials stored in Streamlit's secrets manager rather than
+in the codebase. This allowed stakeholders and evaluators to access the software
+interface through a permanent public URL without requiring any local installation. It
+is worth noting that the live webcam feed and Arduino serial communication are only
+functional when the application is run locally on the machine physically connected to
+the hardware. The cloud deployment serves the dashboard, analytics, logging, and user
+management modules.
+One important design decision made in this iteration was the ordering of
+database write and motor command. The save to Supabase happens first; the motor
+command is only sent if the save succeeds. This guarantees that the physical state of
+the conveyor and the database record stay consistent, even if the network drops out for
+a moment.
+3.2.4 Testing and Evaluation Phase
+Testing was carried out in three stages: unit tests, accuracy tests and full-loop
+integration tests. Unit tests covered individual components in isolation — the camera
+capture function, the Supabase insert function and the Arduino write function — to
+confirm each one worked on its own. Accuracy testing fed a held-out set of brake disc
+images through the YOLOv8 model to measure precision, recall and mean Average
+Precision against the confidence
+
+--- PAGE 33 ---
+Integration testing put the whole pipeline together. A brake disc was placed on
+the conveyor, the IR sensor triggered the SCAN signal, the webcam captured five
+frames, YOLOv8 produced a Pass or Fail decision, the result was written to Supabase,
+and the Arduino either moved the conveyor forward or reversed it. This stage is where
+the most stubborn issues showed up: serial deadlocks when both ends tried to read at
+the same time, brief power brownouts on the L298N when the motor stalled, and
+motion blur on frames captured immediately after the IR trigger. The 800 ms sleep and
+10-frame buffer flush were added directly in response to the blur problem.
+To support real-time performance during testing, the system was run on a
+workstation with an AMD Ryzen 5 7500F, 32GB of RAM and an NVIDIA RTX 5060
+GPU. This setup kept YOLOv8 inference well under 100 ms per frame, which gave
+the conveyor enough headroom to react before the next part reached the sorting point.
+\
+22
+
+--- PAGE 34 ---
+3.3 Hardware and Software Requirements
+To facilitate the development of the AutoVision system, specific hardware and
+software tools were utilized. Table 3.2 and Table 3.3 detail the technical specifications
+required
+Table 3.2: Hardware Specifications
+Hardware Component Specification
+Main Computer PC with AMD Ryzen 5 7500F, 32GB RAM, NVIDIA
+RTX 5060 GPU
+Imaging Device 1440p HD Webcam (captured at 1920x1080 MJPG
+through OpenCV)
+Microcontroller Durian UNO V3 (Arduino UNO compatible)
+Motor Driver L298N dual H-bridge motor driver
+Conveyor System DIY mini conveyor belt
+Actuator MG996R servo / geared DC motor
+Object Sensor IR sensor (used as the SCAN trigger)
+Connectivity Standard USB cable for serial communication at 9600
+baud
+Table 3.3: Software Specifications
+Software Tool Specification
+Operating System Windows 11
+Language Python 3.12
+Code Editor Visual Studio Code (VS Code)
+AI Library Ultralytics YOLOv8 (custom-trained weights: model.pt)
+Web Framework Streamlit
+Database & Auth Supabase (PostgreSQL, cloud-hosted)
+Data Annotation Roboflow (online platform)
+Data Visualisation Plotly Express
+23
+
+--- PAGE 35 ---
+Software Tool Specification
+Serial Communication PySerial
+Image Processing OpenCV (CAP_DSHOW backend, MJPG codec)
+Arduino IDE Arduino IDE 2.x for firmware development
+Deployment Platform Streamlit Community Cloud (cloud hosting, public
+URL)
+Version Control Git / GitHub (repository hosting and CI/CD trigger)
+3.4 Chapter Summary
+In summary, this chapter has detailed the Iterative Model methodology adopted for the
+AutoVision project. It outlined the cyclical phases of Planning, Analysis, Design,
+Implementation, and Testing, demonstrating how this approach allows for continuous
+refinement of the system's AI and IoT components. The specific hardware and software
+tools used were also listed to provide technical context. The following chapter will
+examine deeper into the system analysis and the specific architectural design of the
+proposed solution.
+24
+
+--- PAGE 36 ---
+CHAPTER 4
+ANALYSIS AND DESIGN
+This chapter deals with the results of analysis and design of the AutoVision Defect
+Detection System. In the analysis phase, it is ensured that the system satisfies all the
+specified requirements by analyzing the existing manual inspection processes,
+understanding the problem scope, and identifying the required constraints for
+automation. This gathered information is then transformed into logical system models
+and physical system designs. In section 4.2, the system requirement analysis is
+described in detail that defines the system requirements. In section 4.3, system
+modeling with the aid of Unified Modeling Language (UML) diagrams like use case
+diagram, activity diagram, sequence diagram, class diagram, and Requirement
+Traceability Matrix (RTM) is described. In section 4.4, the physical design phase of
+the system that deals with system architecture, data schema, data dictionary, and user
+interface design of each module is described. Finally, section 4.5 provides an
+conclusion to the chapter.
+4.1 Introduction
+The purpose of the analysis and design phase is to convert the requirements into a clear
+technical blueprint. The analysis focuses on identifying functional and non-functional
+requirements, while the design phase uses object-oriented principles and UML
+diagrams to describe the structure and behaviour of the system. UML diagrams such
+as use case, activity, sequence and class diagrams are widely used to support
+systematic software development and to reduce ambiguity before coding begins
+(Dennis et al., 2021b; Booch et al., 2007).
+Data flow diagrams are used to show how information moves between
+modules, while UML diagrams help plan the code structure. The database design and
+25
+
+--- PAGE 37 ---
+user interface design close out the chapter, putting the project in a position where
+implementation can begin without further design decisions.
+4.2 System Requirement Analysis
+To solve the problems of manual inspection and data loss at HICOM Diecastings, we
+broke the system down into specific needs. These are split into two categories: what
+the system does (Functional) and how well it performs (Non-Functional).
+4.2.1 Functional Requirements
+We organized the system functions into eight distinct modules. Table 4.1 details
+exactly what each module is responsible for.
+Table 4.2.1: Functional Requirements
+Module Functionality
+1. Login The system must verify the username and SHA-256 hashed
+password entered by the user against records in the Supabase
+'users' table to grant access.
+2. Profile The system must allow logged-in users to view their account
+details and update their email or password after entering the
+current password for verification.
+3. Image Input The system must connect to the webcam, capture a continuous
+1920x1080 MJPG video stream using OpenCV, and display it
+on the operator dashboard.
+4. Defect Detection On receiving the SCAN signal from the Arduino, the system
+must flush 10 buffer frames, capture 5 fresh frames, run
+YOLOv8 inference (conf=0.15) on each, and select the highest-
+confidence detection as the final result.
+5. Conveyor Sorting After saving the result to Supabase, the system must write a
+single byte to the Arduino: b'1' to drive the conveyor forward
+26
+
+--- PAGE 38 ---
+Module Functionality
+(Pass) or b'0' to reverse it (Fail).
+6. Data Logging The system must save every inspection event to the Supabase
+'inspections' table with timestamp, status, confidence_score and
+operator_id, and refresh the dashboard panels.
+7. Reports & Analytics The system must let admin users filter inspection history by
+date range, compute totals and fail rate, render Plotly bar and
+pie charts, and export the filtered records as CSV.
+8. User Management The system must let admin users add new operators or admins,
+change roles and delete accounts. Admins must not be able to
+delete their own account.
+4.2.2 Non-Functional Requirements
+In terms of non-functional requirements, the AutoVision system is designed to support
+real-time defect detection with minimal processing delay. Real-time computer vision
+systems must process visual data efficiently to ensure timely decision-making in
+automated environments (Redmon et al., 2016). The system is expected to achieve a
+satisfactory detection accuracy in order to reduce false classification of defective and
+non-defective products. Reliability is also an important requirement, as the system
+should operate continuously during inspection without frequent failures, ensuring
+consistent quality control results in an industrial setting (Sommerville, 2016).
+Table 4.2.2: Non-Functional Requirements
+Category Description
+Performance End-to-end inspection latency (from SCAN signal to motor
+command) must be under one second. YOLOv8 inference on a
+single frame should run in under 100 ms on the target
+hardware.
+Reliability The system must continue running when the Arduino is
+27
+
+--- PAGE 39 ---
+Category Description
+disconnected or when Supabase is briefly unreachable. The
+save-then-actuate ordering must guarantee no motor command
+is sent without a database record.
+Accuracy YOLOv8 operates with a minimum confidence threshold of
+0.15. The 5-frame multi-capture is used to reduce false
+negatives caused by motion blur on a single frame. Target mAP
+is at least 85% on the held-out test set.
+Usability Operators should be able to read the Pass/Fail status from a few
+metres away. The status card uses high-contrast green and red
+blocks, and a daily counter on top of the dashboard summarises
+Total, Passed and Failed counts.
+Security Passwords are stored as SHA-256 hashes, never in plain text.
+Note that SHA-256 is a fast hashing function; a purpose-built
+algorithm such as bcrypt or Argon2 is recommended for a
+production deployment to provide stronger resistance against
+brute-force attacks. Admin-only pages perform a server-side
+role check before rendering. Admins cannot delete their own
+account, which prevents accidental lockout.
+Maintainability Functions are grouped by concern (auth, database, hardware,
+charts) inside a single dashboard.py file. Heavy resources
+(YOLO model, Supabase client, serial connection) are cached
+using @st.cache_resource so that Streamlit reruns stay fast.
+4.3 Object-Oriented Design (UML Diagrams)
+Following the Object oriented methodology, UML diagrams are used to model the
+interactions between the system's objects and users.
+4.3.1 Use Case Diagram
+The AutoVision system consists of eight functional modules, with access divided
+between the Operator and the Administrator to ensure smooth operation. The core
+28
+
+--- PAGE 40 ---
+inspection process relies on six modules available to both users. This starts with Login
+and Profile Management for secure access. The actual quality control is handled by the
+Image Input, Defect Detection, and Conveyor Sorting modules, which work together
+to capture video, identify defects using AI, and control the physical sorting mechanism.
+All inspection results are automatically saved by the Data Logging module for future
+reference.
+In addition to these, the Administrator has exclusive access to two management
+modules. The Report & Statistics module allows them to analyze defect trends through
+charts and export data to Excel, while the User Management module lets them add new
+operators, manage accounts, and reset passwords. This structure ensures that Operators
+can focus on the production line while Administrators handle high-level supervision
+and security.
+Figure 4.3.1 Use case Diagram Of AutoVision System
+29
+
+--- PAGE 41 ---
+4.3.2 Use Case Specification
+Though Use Case Diagram gives a broad idea about the functional capabilities of the
+system, it does not define the detailed logic and data flow for these interactions. To
+overcome this limitation, Use Case Specifications are prepared for each important use
+case that has been identified in the Use Case Diagram. Use Case Specification is a
+formal textual description that explains how the primary actor and the system interact
+step by step for a particular task (Dennis et al., 2021b).
+Every specification outlines the Basic Flow of Events, Alternative Flows, Pre-
+conditions, and Post-conditions. It is important that this level of information be
+provided in order to bridge the requirements analysis and coding phases of
+development and ensure that exceptions, such as a disconnection from a camera or a
+database problem, are considered within the design phase of a system (Kendall &
+Kendall, 2020).
+1. UC001 Login
+This specification details the authentication process. It ensures that only authorized
+Operators and Administrators can access the system functionalities.
+Table 4.3.1: Use Case Specification for Login
+Field Description
+Use Case ID UC-01
+Use Case Name Login
+Created by Muhamad Amirul Aiman
+Date Created 28 December 2025
+Primary Actor Admin, Operator
+Description Allows users to authenticate into the system to access
+their dashboards.
+Pre-Condition The user must already be registered in the Supabase
+'users' table.
+Post-Condition The user is granted access to the dashboard, with menu
+30
+
+--- PAGE 42 ---
+Field Description
+items filtered by role.
+Normal Flow 1. User opens the Streamlit login page.
+2. User enters username and password.
+3. System hashes the password using SHA-256.
+4. System queries Supabase for a user row where
+username and hash both match.
+5. System stores the matched row in st.session_state.user
+and triggers st.rerun() to load the dashboard.
+Alternative Flow A1: Invalid credentials — system shows 'Invalid
+Username or Password' and clears the password field.
+Exceptions E1: Supabase unreachable — system displays a 'Login
+Error' message and asks the user to retry.
+Figure 4.3.2 Login Activity Diagram
+31
+
+--- PAGE 43 ---
+Field Description
+Figure 4.3.3 Login Sequence Diagram
+2. UC002 Manage Profile
+This use case lets logged-in users maintain their own account details. Users can update
+their email and change their password, but they must enter their current password first
+to confirm the change. The username field is read-only to preserve the audit trail in the
+inspections table.
+Table 4.3.2: Use Case Specification for Profile Management
+Field Description
+Use Case ID UC-02
+Use Case Name Profile Management
+Created by Muhamad Amirul Aiman
+Date Created 28 December 2025
+Primary Actor Admin, Operator
+Description Allows logged-in users to view their account and update their email or
+32
+
+--- PAGE 44 ---
+Field Description
+password.
+Pre-Condition User must be logged in (session_state.logged_in == True).
+Post-Condition User's email or password (SHA-256 hashed) is updated in Supabase.
+Normal Flow 1. User opens the Manage Profile page from the sidebar.
+2. System displays the current username (read-only) and email.
+3. User edits the email or enters a new password.
+4. User enters the current password for confirmation and clicks Save
+Changes.
+5. System verifies the current password by comparing SHA-256 hashes.
+6. System updates the 'users' row in Supabase and refreshes
+session_state.
+Alternative Flow A1: Current password incorrect — system shows 'Incorrect current
+password'.
+A2: New passwords do not match or are shorter than 6 characters —
+system shows the corresponding error.
+Exceptions E1: Supabase update fails — system displays 'Failed to update profile'.
+Figure 4.3.4 Manage Profile Activity Diagram
+33
+
+--- PAGE 45 ---
+Field Description
+Figure 4.3.5 Manage Profile Sequence Diagram
+3. UC003 Image Input
+This use case covers the live camera feed that operators see on the dashboard. The
+webcam is opened through OpenCV using the DirectShow backend (CAP_DSHOW),
+set to MJPG codec at 1920x1080 with a buffer size of 1 to minimise lag. To keep the
+dashboard responsive without overloading the GPU, YOLOv8 only runs on every third
+frame during preview.
+Table 4.3.3: Use Case Specification for Image Input
+Field Description
+Use Case ID UC-03
+34
+
+--- PAGE 46 ---
+Field Description
+Use Case Name Monitor Image Input
+Created by Muhamad Amirul Aiman
+Date Created 28 December 2025
+Primary Actor Operator
+Description Streams the live video feed from the 1440p webcam and
+shows YOLOv8 preview detections on every third frame.
+Pre-Condition Webcam connected via USB. The 'Start Camera System'
+checkbox is ticked.
+Post-Condition Live video is shown in the frame_window component, with
+bounding boxes on preview frames.
+Normal Flow 1. Operator opens the Defect Detection page.
+2. Operator ticks 'Start Camera System'.
+3. System opens VideoCapture(0, CAP_DSHOW) and sets
+MJPG + 1920x1080 + buffer=1.
+4. System enters a frame loop: read frame, increment counter,
+run YOLOv8 every third frame.
+5. Annotated or raw frame is displayed in the dashboard.
+6. Loop continues until the checkbox is unticked.
+Alternative Flow A1: Camera fails to open — system displays 'Camera could
+not be opened' and stops the loop.
+Exceptions E1: cap.read() returns False mid-loop — system shows
+'Camera error' and breaks out of the loop.
+35
+
+--- PAGE 47 ---
+Field Description
+Figure 4.3.6 Monitor Image Input Activity Diagram
+36
+
+--- PAGE 48 ---
+Field Description
+Figure 4.3.7 Monitor Image Input Sequence Diagram
+4. UC004 Defect Detection
+As the core function of the AutoVision system, this use case details how the Artificial
+Intelligence model analyzes video frames. It explains the logic flow from capturing an
+image to using the YOLOv8 algorithm to determine if a product is "Pass" or "Fail"
+based on confidence scores.
+Table 4.3.4: Use Case Specification for Defect Detection
+Field Description
+Use Case ID UC-04
+Use Case Name Detect Defect
+37
+
+--- PAGE 49 ---
+Field Description
+Created by Muhamad Amirul Aiman
+Date Created 28 December 2025
+Primary Actor Operator (the inspection itself runs automatically once SCAN is
+received)
+Description Uses the YOLOv8 model to analyse 5 captured frames and produce a
+final Pass or Fail decision based on the highest-confidence detection.
+Pre-Condition Camera is running, YOLO model loaded (bestv4.pt), Arduino
+connected and IR sensor active.
+Post-Condition Final Pass/Fail status is computed, displayed and saved to Supabase.
+Arduino motor command is sent only if the save succeeds.
+Normal Flow 1. Arduino sends 'SCAN' over serial after the IR sensor detects a brake
+disc.
+2. Python receives the signal and sleeps 0.8 s for the part to stabilise.
+3. Python flushes 10 frames from the webcam buffer.
+4. Python captures 5 fresh frames in sequence.
+5. YOLOv8 runs on each frame with conf_threshold=0.15.
+6. Python picks the detection with the highest confidence across all 5
+frames.
+7. If any frame found a defect, status = 'Fail' and command = b'0'.
+Otherwise status = 'Pass' and command = b'1'.
+8. System saves the result to Supabase, then sends the motor byte to
+the Arduino.
+Alternative A1: Database save fails — system displays 'Supabase save failed.
+Flow Motor command was not sent', skips the Arduino write and exits the
+SCAN cycle.
+Exceptions E1: Serial read fails mid-cycle — system catches the exception and
+shows 'Serial communication error'.
+38
+
+--- PAGE 50 ---
+Field Description
+Figure 4.3.8 Defect Detection Activity Diagram
+39
+
