@@ -781,35 +781,38 @@ if selected_page == "Defect Detection":
 
     conf_threshold = 0.50
 
-    today_counter = st.empty()
+    _page_body = st.empty()
 
     def render_today_counter(container):
         passed, failed = fetch_today_counts()
         total = passed + failed
+        container.empty()
         with container.container():
             m1, m2, m3 = st.columns(3)
             m1.metric("Today — Total", total)
             m2.metric("Passed", passed)
             m3.metric("Failed", failed)
 
-    render_today_counter(today_counter)
+    with _page_body.container():
+        today_counter = st.empty()
+        render_today_counter(today_counter)
 
-    col_main, col_side = st.columns([2, 1])
+        col_main, col_side = st.columns([2, 1])
 
-    with col_main:
-        st.subheader("Live Defect Detection")
-        run_system = st.checkbox("Start Camera System", value=False)
-        manual_scan = st.button("🔍 Manual Scan (Demo)", type="secondary", help="Trigger a scan manually without Arduino signal")
-        result_card = st.empty()
-        status_box = st.empty()
-        frame_window = st.empty()
+        with col_main:
+            st.subheader("Live Defect Detection")
+            run_system = st.checkbox("Start Camera System", value=False)
+            manual_scan = st.button("🔍 Manual Scan (Demo)", type="secondary", help="Trigger a scan manually without Arduino signal")
+            result_card = st.empty()
+            status_box = st.empty()
+            frame_window = st.empty()
 
-    with col_side:
-        log_placeholder = st.empty()
-        trend_placeholder = st.empty()
+        with col_side:
+            log_placeholder = st.empty()
+            trend_placeholder = st.empty()
 
-    update_log_display(log_placeholder)
-    render_trend(trend_placeholder)
+        update_log_display(log_placeholder)
+        render_trend(trend_placeholder)
 
     if run_system:
         cap = cv2.VideoCapture(int(camera_index), cv2.CAP_DSHOW)
@@ -1046,7 +1049,7 @@ if selected_page == "Defect Detection":
             if total_session > 0:
                 st.session_state.show_session_summary = True
 
-    if st.session_state.get("show_session_summary", False) and not run_system:
+    if st.session_state.get("show_session_summary", False) and not run_system and (st.session_state.session_passed + st.session_state.session_failed) > 0:
         sp = st.session_state.session_passed
         sf = st.session_state.session_failed
         st_total = sp + sf
