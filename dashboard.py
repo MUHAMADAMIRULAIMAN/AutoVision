@@ -226,7 +226,18 @@ if "show_session_summary" not in st.session_state:
 
 def get_available_ports():
     ports = serial.tools.list_ports.comports()
-    return [port.device for port in ports]
+    return sorted([port.device for port in ports])
+
+
+def get_default_port(ports):
+    """Prefer the port whose description contains 'Arduino' or 'CH340',
+    otherwise fall back to the last (highest-numbered) COM port."""
+    all_ports = serial.tools.list_ports.comports()
+    for p in all_ports:
+        desc = (p.description or "").lower()
+        if "arduino" in desc or "ch340" in desc or "ch341" in desc or "usb serial" in desc:
+            return p.device
+    return ports[-1] if ports else None
 
 
 @st.cache_resource
@@ -681,9 +692,12 @@ role = st.session_state.user.get("role", "operator")
 available_ports = get_available_ports()
 
 if available_ports:
+    default_port = get_default_port(available_ports)
+    default_index = available_ports.index(default_port) if default_port in available_ports else 0
     selected_port = st.sidebar.selectbox(
         "Arduino COM Port",
-        available_ports
+        available_ports,
+        index=default_index
     )
 else:
     selected_port = None
@@ -692,16 +706,32 @@ else:
 arduino = connect_arduino(selected_port)
 
 st.sidebar.markdown("---")
+st.sidebar.subheader("📷 Camera Settings")
+camera_index = st.sidebar.number_input(
+    "Camera Index",
+    min_value=0,
+    max_value=5,
+    value=0,
+    step=1,
+    help="0 = first camera. Change to 1 or 2 if the wrong camera opens."
+)
+
+st.sidebar.markdown("---")
 st.sidebar.subheader("🖥️ System Health")
 
 cam_ok = st.session_state.get("camera_active", False)
 arduino_ok = arduino is not None and arduino.is_open
 model_ok = model is not None
-try:
-    supabase.table("inspections").select("id").limit(1).execute()
-    db_ok = True
-except Exception:
-    db_ok = False
+
+_last_db_check = st.session_state.get("_last_db_check_time", 0)
+if time.time() - _last_db_check > 30:
+    try:
+        supabase.table("inspections").select("id").limit(1).execute()
+        st.session_state["_db_ok"] = True
+    except Exception:
+        st.session_state["_db_ok"] = False
+    st.session_state["_last_db_check_time"] = time.time()
+db_ok = st.session_state.get("_db_ok", True)
 
 st.sidebar.markdown(
     f"{'🟢' if cam_ok else '🔴'} **Camera:** {'Active' if cam_ok else 'Inactive'}\n\n"
@@ -749,7 +779,7 @@ if st.sidebar.button("Log Out"):
 if selected_page == "Defect Detection":
     st.title("🛡️ Defect Detection & Operator Dashboard")
 
-    conf_threshold = 0.15
+    conf_threshold = 0.50
 
     today_counter = st.empty()
 
@@ -769,6 +799,7 @@ if selected_page == "Defect Detection":
     with col_main:
         st.subheader("Live Defect Detection")
         run_system = st.checkbox("Start Camera System", value=False)
+        manual_scan = st.button("🔍 Manual Scan (Demo)", type="secondary", help="Trigger a scan manually without Arduino signal")
         result_card = st.empty()
         status_box = st.empty()
         frame_window = st.empty()
@@ -781,7 +812,7 @@ if selected_page == "Defect Detection":
     render_trend(trend_placeholder)
 
     if run_system:
-        cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+        cap = cv2.VideoCapture(int(camera_index), cv2.CAP_DSHOW)
 
         cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
@@ -845,7 +876,14 @@ if selected_page == "Defect Detection":
             # HARDWARE COMMUNICATION
             # =====================================================
 
-            if arduino is not None and arduino.in_waiting > 0:
+            try:
+                arduino_has_data = arduino is not None and arduino.in_waiting > 0
+            except Exception:
+                arduino_has_data = False
+
+            trigger_scan = manual_scan
+
+            if arduino_has_data:
                 try:
                     raw_msg = arduino.read(arduino.in_waiting)
                     arduino_msg = raw_msg.decode("utf-8", errors="ignore").strip()
@@ -855,155 +893,151 @@ if selected_page == "Defect Detection":
                         status_box.caption(f"Arduino: {arduino_msg}")
 
                     if "SCAN" in arduino_msg.upper():
-                        print("🎯 SCAN command detected.")
-                        status_box.warning("SCAN received. Capturing inspection image...")
-
-                        time.sleep(0.8)
-
-                        for _ in range(10):
-                            cap.read()
-
-                        # =================================================
-                        # MULTI-FRAME SCAN
-                        # Capture 5 frames, run YOLO on each.
-                        # Fail if any frame detects a defect — keeps the
-                        # highest-confidence detection as the result.
-                        # =================================================
-
-                        SCAN_FRAMES = 5
-                        best_conf = None
-                        best_result = None
-
-                        cls_names = None
-
-                        for _ in range(SCAN_FRAMES):
-                            ret, fresh_frame = cap.read()
-                            if not ret:
-                                continue
-
-                            result = model.predict(
-                                fresh_frame,
-                                verbose=False
-                            )
-
-                            if cls_names is None:
-                                cls_names = result[0].names
-
-                            defect_idx = next(
-                                (k for k, v in cls_names.items() if v.lower() == "defect"),
-                                None
-                            )
-
-                            if defect_idx is not None:
-                                frame_conf = float(result[0].probs.data[defect_idx])
-                                if best_conf is None or frame_conf > best_conf:
-                                    best_conf = frame_conf
-                                    best_result = result
-                            elif best_result is None:
-                                best_result = result
-
-                        if best_result is None:
-                            status_box.error("Failed to capture inspection image.")
-                        else:
-                            # =================================================
-                            # RESULT DECISION
-                            # =================================================
-
-                            if best_conf is not None and best_conf >= conf_threshold:
-                                conf = best_conf
-                                status = "Fail"
-                                command = b"0"
-
-                                st.toast(f"❌ Defect Detected! ({conf:.2f})")
-                                status_box.error(
-                                    f"Defect detected. Confidence: {conf:.2f}"
-                                )
-
-                            else:
-                                conf = best_conf if best_conf is not None else 0.0
-                                status = "Pass"
-                                command = b"1"
-
-                                st.toast("✅ Product Passed Inspection")
-                                status_box.success("Product passed inspection.")
-
-                            # =================================================
-                            # HEATMAP OVERLAY
-                            # =================================================
-
-                            inspected_rgb = cv2.cvtColor(
-                                best_result[0].plot(),
-                                cv2.COLOR_BGR2RGB
-                            )
-
-                            heatmap_conf = conf if conf is not None else 0.0
-                            inspected_rgb = create_confidence_overlay(
-                                inspected_rgb,
-                                heatmap_conf,
-                                is_defect=(status == "Fail")
-                            )
-
-                            frame_window.image(
-                                inspected_rgb,
-                                channels="RGB",
-                                use_container_width=True
-                            )
-
-                            show_result_card(result_card, status, conf if status == "Fail" else None)
-
-                            # =================================================
-                            # SAVE TO SUPABASE FIRST, THEN MOVE MOTOR
-                            # =================================================
-
-                            print("💾 Saving inspection result to Supabase...")
-                            save_success = log_inspection(status, conf)
-
-                            if save_success:
-                                print("✅ Data saved successfully.")
-
-                                if status == "Pass":
-                                    st.session_state.session_passed += 1
-                                else:
-                                    st.session_state.session_failed += 1
-
-                                st.session_state.trend_data.append({"status": status})
-                                if len(st.session_state.trend_data) > 50:
-                                    st.session_state.trend_data = st.session_state.trend_data[-50:]
-
-                                render_today_counter(today_counter)
-                                update_log_display(log_placeholder)
-                                render_trend(trend_placeholder)
-
-                                if arduino is not None and arduino.is_open:
-                                    if status == "Pass":
-                                        print("📤 Sending '1' to Arduino: Forward/Pass")
-                                    else:
-                                        print("📤 Sending '0' to Arduino: Backward/Fail")
-
-                                    arduino.write(command)
-                                    arduino.flush()
-
-                                    status_box.info(
-                                        "Result saved. Motor command sent to Arduino."
-                                    )
-                                else:
-                                    status_box.error(
-                                        "Arduino not connected. Motor command not sent."
-                                    )
-
-                            else:
-                                print("❌ Supabase save failed. Motor command NOT sent.")
-                                status_box.error(
-                                    "Supabase save failed. Motor command was not sent."
-                                )
-
-                        time.sleep(0.5)
-                        if arduino is not None:
-                            arduino.reset_input_buffer()
+                        trigger_scan = True
 
                 except Exception as e:
-                    print(f"❌ Serial communication error: {e}")
-                    status_box.error(f"Serial communication error: {e}")
+                    print(f"❌ Serial read error: {e}")
+
+            if trigger_scan:
+                try:
+                    print("🎯 SCAN triggered.")
+                    label = "Manual scan triggered." if manual_scan else "SCAN received. Capturing inspection image..."
+                    status_box.warning(label)
+
+                    time.sleep(0.8)
+
+                    for _ in range(10):
+                        cap.read()
+
+                    # =================================================
+                    # MULTI-FRAME SCAN
+                    # =================================================
+
+                    SCAN_FRAMES = 5
+                    best_conf = None
+                    best_result = None
+                    cls_names = None
+
+                    for _ in range(SCAN_FRAMES):
+                        ret, fresh_frame = cap.read()
+                        if not ret:
+                            continue
+
+                        result = model.predict(
+                            fresh_frame,
+                            verbose=False
+                        )
+
+                        if cls_names is None:
+                            cls_names = result[0].names
+
+                        defect_idx = next(
+                            (k for k, v in cls_names.items() if v.lower() == "defect"),
+                            None
+                        )
+
+                        if defect_idx is not None:
+                            frame_conf = float(result[0].probs.data[defect_idx])
+                            if best_conf is None or frame_conf > best_conf:
+                                best_conf = frame_conf
+                                best_result = result
+                        elif best_result is None:
+                            best_result = result
+
+                    if best_result is None:
+                        status_box.error("Failed to capture inspection image.")
+                    else:
+                        # =================================================
+                        # RESULT DECISION
+                        # =================================================
+
+                        if best_conf is not None and best_conf >= conf_threshold:
+                            conf = best_conf
+                            status = "Fail"
+                            command = b"0"
+
+                            st.toast(f"❌ Defect Detected! ({conf:.2f})")
+                            status_box.error(
+                                f"Defect detected. Confidence: {conf:.2f}"
+                            )
+
+                        else:
+                            conf = best_conf if best_conf is not None else 0.0
+                            status = "Pass"
+                            command = b"1"
+
+                            st.toast("✅ Product Passed Inspection")
+                            status_box.success("Product passed inspection.")
+
+                        # =================================================
+                        # HEATMAP OVERLAY
+                        # =================================================
+
+                        inspected_rgb = cv2.cvtColor(
+                            best_result[0].plot(),
+                            cv2.COLOR_BGR2RGB
+                        )
+
+                        heatmap_conf = conf if conf is not None else 0.0
+                        inspected_rgb = create_confidence_overlay(
+                            inspected_rgb,
+                            heatmap_conf,
+                            is_defect=(status == "Fail")
+                        )
+
+                        frame_window.image(
+                            inspected_rgb,
+                            channels="RGB",
+                            use_container_width=True
+                        )
+
+                        show_result_card(result_card, status, conf if status == "Fail" else None)
+
+                        # =================================================
+                        # MOTOR COMMAND THEN SUPABASE SAVE
+                        # =================================================
+
+                        print("💾 Saving inspection result to Supabase...")
+                        if arduino is not None and arduino.is_open:
+                            print(f"📤 Sending {'1' if status == 'Pass' else '0'} to Arduino")
+                            arduino.write(command)
+                            arduino.flush()
+                            status_box.info("Motor command sent. Saving to database...")
+                        else:
+                            status_box.warning("Arduino not connected. Motor command skipped.")
+
+                        save_success = log_inspection(status, conf)
+
+                        if save_success:
+                            print("✅ Data saved successfully.")
+
+                            if status == "Pass":
+                                st.session_state.session_passed += 1
+                            else:
+                                st.session_state.session_failed += 1
+
+                            st.session_state.trend_data.append({"status": status})
+                            if len(st.session_state.trend_data) > 50:
+                                st.session_state.trend_data = st.session_state.trend_data[-50:]
+
+                            render_today_counter(today_counter)
+                            update_log_display(log_placeholder)
+                            render_trend(trend_placeholder)
+                            status_box.info("Result saved. Inspection complete.")
+
+                        else:
+                            print("❌ Supabase save failed.")
+                            status_box.error(
+                                "Motor command sent but database save failed. Check connection."
+                            )
+
+                    time.sleep(0.5)
+                    if arduino is not None:
+                        arduino.reset_input_buffer()
+
+                except Exception as e:
+                    print(f"❌ Scan error: {e}")
+                    status_box.error(f"Scan error: {e}")
 
         finally:
             cap.release()
