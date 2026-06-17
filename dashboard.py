@@ -781,8 +781,6 @@ if selected_page == "Defect Detection":
 
     conf_threshold = 0.50
 
-    _page_body = st.empty()
-
     def render_today_counter(container):
         passed, failed = fetch_today_counts()
         total = passed + failed
@@ -793,92 +791,78 @@ if selected_page == "Defect Detection":
             m2.metric("Passed", passed)
             m3.metric("Failed", failed)
 
-    with _page_body.container():
-        today_counter = st.empty()
-        render_today_counter(today_counter)
+    today_counter = st.empty()
+    render_today_counter(today_counter)
 
-        col_main, col_side = st.columns([2, 1])
+    col_main, col_side = st.columns([2, 1])
 
-        with col_main:
-            st.subheader("Live Defect Detection")
-            run_system = st.checkbox("Start Camera System", value=False)
-            manual_scan = st.button("🔍 Manual Scan (Demo)", type="secondary", help="Trigger a scan manually without Arduino signal")
-            result_card = st.empty()
-            status_box = st.empty()
-            frame_window = st.empty()
+    with col_main:
+        st.subheader("Live Defect Detection")
+        run_system = st.checkbox(
+            "Start Camera System",
+            value=st.session_state.get("camera_running", False)
+        )
+        manual_scan = st.button("🔍 Manual Scan (Demo)", type="secondary", help="Trigger a scan manually without Arduino signal")
+        result_card = st.empty()
+        status_box = st.empty()
+        frame_window = st.empty()
 
-        with col_side:
-            log_placeholder = st.empty()
-            trend_placeholder = st.empty()
+    with col_side:
+        log_placeholder = st.empty()
+        trend_placeholder = st.empty()
 
-        update_log_display(log_placeholder)
-        render_trend(trend_placeholder)
+    update_log_display(log_placeholder)
+    render_trend(trend_placeholder)
 
-    if run_system:
+    # ── Camera START ─────────────────────────────────────────
+    if run_system and not st.session_state.get("camera_running", False):
         cap = cv2.VideoCapture(int(camera_index), cv2.CAP_DSHOW)
-
         cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
         cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-
-        frame_count = 0
-        latest_display_frame = None
-
-        if not cap.isOpened():
-            st.error("Camera could not be opened.")
-            st.session_state.camera_active = False
-        else:
+        if cap.isOpened():
+            st.session_state.cap = cap
+            st.session_state.camera_running = True
             st.session_state.camera_active = True
             st.session_state.session_passed = 0
             st.session_state.session_failed = 0
             st.session_state.show_session_summary = False
-            status_box.info("System running. Waiting for Arduino SCAN signal...")
+        else:
+            st.error("Camera could not be opened.")
+            st.session_state.camera_running = False
 
-        try:
-         while cap.isOpened() and run_system:
+    # ── Camera STOP ──────────────────────────────────────────
+    if not run_system and st.session_state.get("camera_running", False):
+        cap = st.session_state.get("cap")
+        if cap:
+            cap.release()
+        st.session_state.cap = None
+        st.session_state.camera_running = False
+        st.session_state.camera_active = False
+        total_session = st.session_state.session_passed + st.session_state.session_failed
+        if total_session > 0:
+            st.session_state.show_session_summary = True
+
+    # ── Per-frame loop (rerun-based, no blocking while loop) ─
+    if st.session_state.get("camera_running", False):
+        cap = st.session_state.get("cap")
+
+        if cap is None or not cap.isOpened():
+            st.error("Camera disconnected.")
+            st.session_state.camera_running = False
+            st.session_state.camera_active = False
+        else:
             ret, frame = cap.read()
 
             if not ret:
-                st.error("Camera error.")
-                break
-
-            frame_count += 1
-
-            # =====================================================
-            # FRAME SKIPPING FOR PERFORMANCE
-            # YOLO only runs on every 3rd frame.
-            # Skipped frames show raw camera image.
-            # =====================================================
-
-            if frame_count % 3 == 0:
-                preview_results = model.predict(
-                    frame,
-                    verbose=False
-                )
-
-                annotated_frame = preview_results[0].plot()
-                latest_display_frame = cv2.cvtColor(
-                    annotated_frame,
-                    cv2.COLOR_BGR2RGB
-                )
-
+                status_box.error("Camera read error.")
             else:
-                latest_display_frame = cv2.cvtColor(
-                    frame,
-                    cv2.COLOR_BGR2RGB
-                )
+                display_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                frame_window.image(display_frame, channels="RGB", use_container_width=True)
+                status_box.info("System running. Waiting for Arduino SCAN signal...")
 
-            frame_window.image(
-                latest_display_frame,
-                channels="RGB",
-                use_container_width=True
-            )
-
-            # =====================================================
-            # HARDWARE COMMUNICATION
-            # =====================================================
-
+            # ── Arduino check ─────────────────────────────
             try:
                 arduino_has_data = arduino is not None and arduino.in_waiting > 0
             except Exception:
@@ -888,8 +872,10 @@ if selected_page == "Defect Detection":
 
             if arduino_has_data:
                 try:
+                    time.sleep(0.05)
                     raw_msg = arduino.read(arduino.in_waiting)
                     arduino_msg = raw_msg.decode("utf-8", errors="ignore").strip()
+                    arduino_msg = "".join(c for c in arduino_msg if c.isprintable())
 
                     if arduino_msg:
                         print(f"📥 Received from Arduino: '{arduino_msg}'")
@@ -901,6 +887,7 @@ if selected_page == "Defect Detection":
                 except Exception as e:
                     print(f"❌ Serial read error: {e}")
 
+            # ── Scan pipeline ─────────────────────────────
             if trigger_scan:
                 try:
                     print("🎯 SCAN triggered.")
@@ -908,13 +895,8 @@ if selected_page == "Defect Detection":
                     status_box.warning(label)
 
                     time.sleep(0.8)
-
                     for _ in range(10):
                         cap.read()
-
-                    # =================================================
-                    # MULTI-FRAME SCAN
-                    # =================================================
 
                     SCAN_FRAMES = 5
                     best_conf = None
@@ -925,20 +907,13 @@ if selected_page == "Defect Detection":
                         ret, fresh_frame = cap.read()
                         if not ret:
                             continue
-
-                        result = model.predict(
-                            fresh_frame,
-                            verbose=False
-                        )
-
+                        result = model.predict(fresh_frame, verbose=False)
                         if cls_names is None:
                             cls_names = result[0].names
-
                         defect_idx = next(
                             (k for k, v in cls_names.items() if v.lower() == "defect"),
                             None
                         )
-
                         if defect_idx is not None:
                             frame_conf = float(result[0].probs.data[defect_idx])
                             if best_conf is None or frame_conf > best_conf:
@@ -950,57 +925,27 @@ if selected_page == "Defect Detection":
                     if best_result is None:
                         status_box.error("Failed to capture inspection image.")
                     else:
-                        # =================================================
-                        # RESULT DECISION
-                        # =================================================
-
                         if best_conf is not None and best_conf >= conf_threshold:
                             conf = best_conf
                             status = "Fail"
                             command = b"0"
-
                             st.toast(f"❌ Defect Detected! ({conf:.2f})")
-                            status_box.error(
-                                f"Defect detected. Confidence: {conf:.2f}"
-                            )
-
+                            status_box.error(f"Defect detected. Confidence: {conf:.2f}")
                         else:
                             conf = best_conf if best_conf is not None else 0.0
                             status = "Pass"
                             command = b"1"
-
                             st.toast("✅ Product Passed Inspection")
                             status_box.success("Product passed inspection.")
 
-                        # =================================================
-                        # HEATMAP OVERLAY
-                        # =================================================
-
-                        inspected_rgb = cv2.cvtColor(
-                            best_result[0].plot(),
-                            cv2.COLOR_BGR2RGB
-                        )
-
+                        inspected_rgb = cv2.cvtColor(best_result[0].plot(), cv2.COLOR_BGR2RGB)
                         heatmap_conf = conf if conf is not None else 0.0
                         inspected_rgb = create_confidence_overlay(
-                            inspected_rgb,
-                            heatmap_conf,
-                            is_defect=(status == "Fail")
+                            inspected_rgb, heatmap_conf, is_defect=(status == "Fail")
                         )
-
-                        frame_window.image(
-                            inspected_rgb,
-                            channels="RGB",
-                            use_container_width=True
-                        )
-
+                        frame_window.image(inspected_rgb, channels="RGB", use_container_width=True)
                         show_result_card(result_card, status, conf if status == "Fail" else None)
 
-                        # =================================================
-                        # MOTOR COMMAND THEN SUPABASE SAVE
-                        # =================================================
-
-                        print("💾 Saving inspection result to Supabase...")
                         if arduino is not None and arduino.is_open:
                             print(f"📤 Sending {'1' if status == 'Pass' else '0'} to Arduino")
                             arduino.write(command)
@@ -1012,27 +957,19 @@ if selected_page == "Defect Detection":
                         save_success = log_inspection(status, conf)
 
                         if save_success:
-                            print("✅ Data saved successfully.")
-
                             if status == "Pass":
                                 st.session_state.session_passed += 1
                             else:
                                 st.session_state.session_failed += 1
-
                             st.session_state.trend_data.append({"status": status})
                             if len(st.session_state.trend_data) > 50:
                                 st.session_state.trend_data = st.session_state.trend_data[-50:]
-
                             render_today_counter(today_counter)
                             update_log_display(log_placeholder)
                             render_trend(trend_placeholder)
                             status_box.info("Result saved. Inspection complete.")
-
                         else:
-                            print("❌ Supabase save failed.")
-                            status_box.error(
-                                "Motor command sent but database save failed. Check connection."
-                            )
+                            status_box.error("Motor command sent but database save failed.")
 
                     time.sleep(0.5)
                     if arduino is not None:
@@ -1042,42 +979,39 @@ if selected_page == "Defect Detection":
                     print(f"❌ Scan error: {e}")
                     status_box.error(f"Scan error: {e}")
 
-        finally:
-            cap.release()
-            st.session_state.camera_active = False
-            total_session = st.session_state.session_passed + st.session_state.session_failed
-            if total_session > 0:
-                st.session_state.show_session_summary = True
+            time.sleep(0.05)
+            st.rerun()
 
-    if st.session_state.get("show_session_summary", False) and not run_system and (st.session_state.session_passed + st.session_state.session_failed) > 0:
+    if st.session_state.get("show_session_summary", False) and not st.session_state.get("camera_running", False):
         sp = st.session_state.session_passed
         sf = st.session_state.session_failed
         st_total = sp + sf
-        rate = (sf / st_total * 100) if st_total > 0 else 0.0
-        st.markdown(
-            f"""
-            <div style="
-                background: linear-gradient(135deg, #00153B, #00205B);
-                border: 1px solid #D6001C;
-                border-radius: 10px;
-                padding: 16px 20px;
-                margin-top: 12px;
-                animation: fadeIn 0.5s ease-out;
-                color: white;
-            ">
-                <div style="font-size:15px; font-weight:700; margin-bottom:10px;">
-                    📊 Session Summary
+        if st_total > 0:
+            rate = (sf / st_total * 100)
+            st.markdown(
+                f"""
+                <div style="
+                    background: linear-gradient(135deg, #00153B, #00205B);
+                    border: 1px solid #D6001C;
+                    border-radius: 10px;
+                    padding: 16px 20px;
+                    margin-top: 12px;
+                    animation: fadeIn 0.5s ease-out;
+                    color: white;
+                ">
+                    <div style="font-size:15px; font-weight:700; margin-bottom:10px;">
+                        📊 Session Summary
+                    </div>
+                    <div style="display:flex; gap:32px; font-size:14px;">
+                        <span>🔢 Total: <strong>{st_total}</strong></span>
+                        <span style="color:#21c354;">✅ Passed: <strong>{sp}</strong></span>
+                        <span style="color:#D6001C;">❌ Failed: <strong>{sf}</strong></span>
+                        <span>📉 Fail Rate: <strong>{rate:.1f}%</strong></span>
+                    </div>
                 </div>
-                <div style="display:flex; gap:32px; font-size:14px;">
-                    <span>🔢 Total: <strong>{st_total}</strong></span>
-                    <span style="color:#21c354;">✅ Passed: <strong>{sp}</strong></span>
-                    <span style="color:#D6001C;">❌ Failed: <strong>{sf}</strong></span>
-                    <span>📉 Fail Rate: <strong>{rate:.1f}%</strong></span>
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
+                """,
+                unsafe_allow_html=True
+            )
 
 
 # =========================================================
