@@ -42,138 +42,382 @@ def to_myt(ts_str):
     return ts.tz_convert("Asia/Kuala_Lumpur")
 
 
+CHART_PASS_COLOR = "#0D9F4F"
+CHART_FAIL_COLOR = "#D6001C"
+
+def _chart_layout(**extra):
+    base = dict(
+        plot_bgcolor="#FFFFFF",
+        paper_bgcolor="#FFFFFF",
+        font=dict(color="#1A2744", size=13, family="Segoe UI, sans-serif"),
+        xaxis=dict(
+            gridcolor="#EEF2F7", linecolor="#DDE4EF", showline=True,
+            tickfont=dict(color="#1A2744", size=13),
+            title_font=dict(color="#00205B", size=13),
+        ),
+        yaxis=dict(
+            gridcolor="#EEF2F7", linecolor="#DDE4EF", showline=True,
+            tickfont=dict(color="#1A2744", size=13),
+            title_font=dict(color="#00205B", size=13),
+        ),
+        title_font=dict(color="#00205B", size=15, family="Segoe UI, sans-serif"),
+        showlegend=False,
+        margin=dict(l=8, r=8, t=52, b=8),
+    )
+    base.update(extra)
+    return base
+
+
 def apply_custom_styles():
     st.markdown(
         """
         <style>
+            /* ── Design tokens ──────────────────────────────
+               white   : #FFFFFF
+               navy    : #00205B  (DRB-HICOM primary)
+               navy-mid: #003087
+               red     : #D6001C  (DRB-HICOM accent)
+               red-soft: #FFF0F2  (red tint for backgrounds)
+               grey-50 : #F8FAFB  (page background)
+               grey-100: #EEF2F7  (subtle fill)
+               grey-200: #DDE4EF  (borders)
+               text-pri: #1A2744
+               text-sec: #5A7299
+               green   : #0D9F4F
+               green-bg: #EAF7EE
+            ──────────────────────────────────────────────── */
+
+            /* ── Base ── */
             .stApp {
-                background-color: #0E1117;
-                color: #FFFFFF;
+                background-color: #FFFFFF;
+                color: #1A2744;
+                font-family: 'Segoe UI', sans-serif;
             }
 
+            /* ── Sidebar ── */
             [data-testid="stSidebar"] {
-                background-color: #00153B;
-                border-right: 2px solid #00205B;
+                background: linear-gradient(180deg, #00205B 0%, #001A4A 100%);
+                border-right: 3px solid #D6001C;
+            }
+            [data-testid="stSidebar"] p,
+            [data-testid="stSidebar"] span,
+            [data-testid="stSidebar"] label,
+            [data-testid="stSidebar"] h1,
+            [data-testid="stSidebar"] h2,
+            [data-testid="stSidebar"] h3,
+            [data-testid="stSidebar"] .stMarkdown,
+            [data-testid="stSidebar"] .stCaption,
+            [data-testid="stSidebar"] .stRadio label,
+            [data-testid="stSidebar"] .stRadio [data-testid="stMarkdownContainer"] p {
+                color: #FFFFFF !important;
+            }
+            [data-testid="stSidebar"] .stSelectbox div[data-baseweb="select"] {
+                background-color: #002E7A !important;
+                border-color: #4A7CC7 !important;
+            }
+            [data-testid="stSidebar"] .stSelectbox div[data-baseweb="select"] * {
+                color: #FFFFFF !important;
+            }
+            [data-testid="stSidebar"] .stAlert {
+                background-color: #002E7A;
+                border-color: #D6001C;
             }
 
+            /* ── Buttons ── */
             div.stButton > button[kind="primary"],
             [data-testid="stFormSubmitButton"] > button {
                 background-color: #D6001C !important;
                 border-color: #D6001C !important;
                 color: #FFFFFF !important;
+                border-radius: 6px !important;
+                font-weight: 600 !important;
+                letter-spacing: 0.3px;
             }
-
             div.stButton > button[kind="primary"]:hover,
             [data-testid="stFormSubmitButton"] > button:hover {
-                background-color: #FF1A3A !important;
-                border-color: #FF1A3A !important;
+                background-color: #B5001A !important;
+                border-color: #B5001A !important;
             }
-
             div.stButton > button[kind="secondary"] {
-                border-color: #00205B !important;
-                color: #FFFFFF !important;
-                background-color: transparent !important;
+                border: 1.5px solid #00205B !important;
+                color: #00205B !important;
+                background-color: #FFFFFF !important;
+                border-radius: 6px !important;
+                font-weight: 500 !important;
             }
-
             div.stButton > button[kind="secondary"]:hover {
                 border-color: #D6001C !important;
                 color: #D6001C !important;
+                background-color: #FFF0F2 !important;
             }
 
-            .stTextInput>div>div>input,
-            .stSelectbox>div>div>div[aria-expanded="false"],
-            .stNumberInput>div>div>input {
-                color: #FFFFFF;
-                background-color: #1C1E26;
-                border: 1px solid #00205B;
+            /* ── Download button ── */
+            [data-testid="stDownloadButton"] > button {
+                background-color: #00205B !important;
+                border-color: #00205B !important;
+                color: #FFFFFF !important;
+                border-radius: 6px !important;
+                font-weight: 600 !important;
             }
-
-            [data-testid="stDataFrame"] {
-                border: 1px solid #00205B;
-            }
-
-            hr {
+            [data-testid="stDownloadButton"] > button:hover {
+                background-color: #D6001C !important;
                 border-color: #D6001C !important;
-                opacity: 0.5;
+                color: #FFFFFF !important;
             }
 
-            /* Cap camera feed height so the page fits without scrolling */
+            /* Sidebar log-out button */
+            [data-testid="stSidebar"] div.stButton > button {
+                border-color: rgba(255,255,255,0.35) !important;
+                color: #FFFFFF !important;
+                background-color: transparent !important;
+            }
+            [data-testid="stSidebar"] div.stButton > button:hover {
+                background-color: #D6001C !important;
+                border-color: #D6001C !important;
+            }
+
+            /* ── Inputs ── */
+            .stTextInput > div > div > input,
+            .stNumberInput > div > div > input,
+            .stTextArea textarea {
+                background-color: #FFFFFF !important;
+                border: 1.5px solid #DDE4EF !important;
+                border-radius: 6px !important;
+                color: #1A2744 !important;
+            }
+            .stTextInput > div > div > input:focus,
+            .stNumberInput > div > div > input:focus {
+                border-color: #00205B !important;
+                box-shadow: 0 0 0 2px rgba(0,32,91,0.12) !important;
+            }
+            .stSelectbox > div > div > div[aria-expanded="false"] {
+                background-color: #FFFFFF !important;
+                border: 1.5px solid #DDE4EF !important;
+                color: #1A2744 !important;
+            }
+
+            /* ── Sliders ── */
+            [data-testid="stSlider"] [data-baseweb="slider"] div[role="slider"] {
+                background-color: #D6001C !important;
+            }
+            [data-testid="stSlider"] [data-baseweb="slider"] div:first-child > div:first-child {
+                background-color: #D6001C !important;
+            }
+
+            /* ── Metric cards ── */
+            [data-testid="stMetric"] {
+                background-color: #FFFFFF;
+                border: 1px solid #DDE4EF;
+                border-top: 3px solid #00205B;
+                border-radius: 10px;
+                padding: 14px 18px !important;
+                box-shadow: 0 2px 8px rgba(0,32,91,0.06);
+            }
+            [data-testid="stMetric"] label {
+                color: #5A7299 !important;
+                font-size: 11px !important;
+                font-weight: 700 !important;
+                text-transform: uppercase;
+                letter-spacing: 0.8px;
+            }
+            [data-testid="stMetric"] [data-testid="stMetricValue"] {
+                color: #00205B !important;
+                font-size: 28px !important;
+                font-weight: 800 !important;
+            }
+
+            /* ── Expander ── */
+            [data-testid="stExpander"] {
+                border: 1px solid #DDE4EF !important;
+                border-radius: 10px !important;
+                background-color: #FFFFFF !important;
+                box-shadow: 0 1px 4px rgba(0,32,91,0.05);
+            }
+            [data-testid="stExpander"] summary {
+                color: #00205B !important;
+                font-weight: 600 !important;
+                font-size: 14px;
+            }
+            [data-testid="stExpander"] summary:hover {
+                color: #D6001C !important;
+            }
+
+            /* ── Data table ── */
+            [data-testid="stDataFrame"] {
+                border: 1px solid #DDE4EF;
+                border-radius: 10px;
+                overflow: hidden;
+            }
+
+            /* ── Dividers ── */
+            hr {
+                border: none !important;
+                border-top: 1px solid #EEF2F7 !important;
+                margin: 16px 0 !important;
+            }
+            [data-testid="stSidebar"] hr {
+                border-top: 1px solid rgba(255,255,255,0.12) !important;
+            }
+
+            /* ── Alerts/info boxes ── */
+            [data-testid="stAlert"] {
+                border-radius: 8px !important;
+                border-left-width: 4px !important;
+            }
+
+            /* ── Camera image ── */
             [data-testid="stImage"] img {
                 max-height: 340px;
                 object-fit: contain;
                 width: 100%;
+                border-radius: 10px;
+                border: 1px solid #DDE4EF;
+                box-shadow: 0 2px 8px rgba(0,32,91,0.06);
             }
 
-            /* Tighten metric padding on the detection page */
-            [data-testid="stMetric"] {
-                padding: 4px 8px !important;
+            /* ── Page headings ── */
+            h1 { color: #00205B !important; font-weight: 800 !important; }
+            h2 { color: #00205B !important; font-weight: 700 !important; }
+            h3 { color: #003087 !important; font-weight: 600 !important; }
+
+            /* ── Force all main-content text visible on white ── */
+
+            /* Generic widget label (covers checkbox, slider, number input, selectbox) */
+            section[data-testid="stMain"] [data-testid="stWidgetLabel"] p,
+            section[data-testid="stMain"] [data-testid="stWidgetLabel"] span,
+            section[data-testid="stMain"] label {
+                color: #1A2744 !important;
+            }
+
+            /* Checkbox text */
+            section[data-testid="stMain"] [data-testid="stCheckbox"] span,
+            section[data-testid="stMain"] [data-testid="stCheckbox"] p,
+            section[data-testid="stMain"] [data-testid="stCheckbox"] label {
+                color: #1A2744 !important;
+            }
+
+            /* Radio buttons (main page only — sidebar already white) */
+            section[data-testid="stMain"] .stRadio label,
+            section[data-testid="stMain"] .stRadio p,
+            section[data-testid="stMain"] .stRadio span {
+                color: #1A2744 !important;
+            }
+
+            /* Selectbox options text */
+            section[data-testid="stMain"] .stSelectbox label,
+            section[data-testid="stMain"] .stSelectbox p {
+                color: #1A2744 !important;
+            }
+            section[data-testid="stMain"] div[data-baseweb="select"] span,
+            section[data-testid="stMain"] div[data-baseweb="select"] div {
+                color: #1A2744 !important;
+            }
+
+            /* Slider label and tick values */
+            section[data-testid="stMain"] [data-testid="stSlider"] label,
+            section[data-testid="stMain"] [data-testid="stSlider"] p,
+            section[data-testid="stMain"] [data-testid="stSlider"] span {
+                color: #1A2744 !important;
+            }
+
+            /* Number input label */
+            section[data-testid="stMain"] [data-testid="stNumberInput"] label,
+            section[data-testid="stMain"] [data-testid="stNumberInput"] p {
+                color: #1A2744 !important;
+            }
+
+            /* Disabled / read-only inputs (e.g. username in Manage Profile) */
+            section[data-testid="stMain"] input:disabled,
+            section[data-testid="stMain"] textarea:disabled,
+            section[data-testid="stMain"] .stTextInput input[disabled],
+            section[data-testid="stMain"] .stTextInput input[readonly] {
+                color: #1A2744 !important;
+                -webkit-text-fill-color: #1A2744 !important;
+                opacity: 1 !important;
+                background-color: #F4F6FA !important;
+                border-color: #DDE4EF !important;
+            }
+
+            /* Multiselect */
+            section[data-testid="stMain"] [data-testid="stMultiSelect"] label,
+            section[data-testid="stMain"] [data-testid="stMultiSelect"] p {
+                color: #1A2744 !important;
+            }
+            section[data-testid="stMain"] [data-baseweb="tag"] span {
+                color: #FFFFFF !important;
+            }
+
+            /* Date input */
+            section[data-testid="stMain"] [data-testid="stDateInput"] label,
+            section[data-testid="stMain"] [data-testid="stDateInput"] p {
+                color: #1A2744 !important;
+            }
+
+            /* General markdown paragraphs in main content */
+            section[data-testid="stMain"] .stMarkdown p,
+            section[data-testid="stMain"] .stMarkdown span,
+            section[data-testid="stMain"] .stMarkdown li {
+                color: #1A2744;
+            }
+
+            /* Caption / help text */
+            section[data-testid="stMain"] [data-testid="stCaptionContainer"] p,
+            section[data-testid="stMain"] small {
+                color: #5A7299 !important;
+            }
+
+            /* Info / warning / error text */
+            section[data-testid="stMain"] [data-testid="stAlert"] p {
+                color: #1A2744 !important;
+            }
+
+            /* Subheader and section headers */
+            section[data-testid="stMain"] [data-testid="stHeadingWithActionElements"] h2,
+            section[data-testid="stMain"] [data-testid="stHeadingWithActionElements"] h3 {
+                color: #00205B !important;
             }
 
             /* ── Animations ── */
             @keyframes fadeIn {
-                from { opacity: 0; transform: translateY(8px); }
+                from { opacity: 0; transform: translateY(6px); }
                 to   { opacity: 1; transform: translateY(0); }
             }
-            @keyframes slideInLeft {
-                from { opacity: 0; transform: translateX(-16px); }
-                to   { opacity: 1; transform: translateX(0); }
+            @keyframes slideUp {
+                from { opacity: 0; transform: translateY(14px); }
+                to   { opacity: 1; transform: translateY(0); }
             }
             @keyframes pulseRed {
-                0%   { box-shadow: 0 0 0 0 rgba(214,0,28,0.6); }
-                70%  { box-shadow: 0 0 0 12px rgba(214,0,28,0); }
+                0%   { box-shadow: 0 0 0 0 rgba(214,0,28,0.5); }
+                70%  { box-shadow: 0 0 0 14px rgba(214,0,28,0); }
                 100% { box-shadow: 0 0 0 0 rgba(214,0,28,0); }
             }
             @keyframes pulseGreen {
-                0%   { box-shadow: 0 0 0 0 rgba(33,195,84,0.5); }
-                70%  { box-shadow: 0 0 0 12px rgba(33,195,84,0); }
-                100% { box-shadow: 0 0 0 0 rgba(33,195,84,0); }
+                0%   { box-shadow: 0 0 0 0 rgba(13,159,79,0.5); }
+                70%  { box-shadow: 0 0 0 14px rgba(13,159,79,0); }
+                100% { box-shadow: 0 0 0 0 rgba(13,159,79,0); }
             }
 
-            /* Page fade-in on navigation */
             section[data-testid="stMain"] > div:first-child {
-                animation: fadeIn 0.35s ease-out;
+                animation: fadeIn 0.3s ease-out;
             }
-
-            /* Metric cards slide in */
             [data-testid="stMetric"] {
-                animation: slideInLeft 0.3s ease-out;
+                animation: slideUp 0.3s ease-out;
                 transition: transform 0.2s ease, box-shadow 0.2s ease;
             }
             [data-testid="stMetric"]:hover {
                 transform: translateY(-2px);
-                box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+                box-shadow: 0 6px 16px rgba(0,32,91,0.10);
             }
-
-            /* Buttons smooth transition */
             div.stButton > button {
-                transition: background-color 0.2s ease,
-                            border-color 0.2s ease,
-                            transform 0.15s ease,
-                            box-shadow 0.15s ease !important;
+                transition: all 0.18s ease !important;
             }
             div.stButton > button:hover {
                 transform: translateY(-1px) !important;
-                box-shadow: 0 4px 10px rgba(0,0,0,0.25) !important;
             }
+            [data-testid="stDataFrame"] { animation: fadeIn 0.35s ease-out; }
 
-            /* Sidebar items fade */
-            [data-testid="stSidebar"] .stRadio,
-            [data-testid="stSidebar"] .stSelectbox {
-                animation: fadeIn 0.4s ease-out;
-            }
-
-            /* Dataframe fade */
-            [data-testid="stDataFrame"] {
-                animation: fadeIn 0.4s ease-out;
-            }
-
-            /* Result card pulse classes */
-            .result-fail {
-                animation: pulseRed 0.9s ease-out 2;
-            }
-            .result-pass {
-                animation: pulseGreen 0.9s ease-out 1;
-            }
+            .result-fail { animation: pulseRed  1s ease-out 2; }
+            .result-pass { animation: pulseGreen 1s ease-out 1; }
         </style>
         """,
         unsafe_allow_html=True
@@ -413,20 +657,31 @@ def update_log_display(container):
 
         if logs:
             for row in logs:
-                color = "#D6001C" if row["status"] == "Fail" else "#21c354"
-                t_stamp = to_myt(row["timestamp"]).strftime("%H:%M:%S")
+                is_fail  = row["status"] == "Fail"
+                accent   = "#D6001C"  if is_fail else "#0D9F4F"
+                bg       = "#FFF0F2"  if is_fail else "#EAF7EE"
+                label    = "FAIL"     if is_fail else "PASS"
+                lbl_bg   = "#D6001C"  if is_fail else "#0D9F4F"
+                conf_str = f'{row["confidence_score"]:.2f}' if row.get("confidence_score") is not None else "—"
+                t_stamp  = to_myt(row["timestamp"]).strftime("%H:%M:%S")
 
                 st.markdown(
                     f"""
                     <div style="
-                        padding:10px;
-                        border-left: 5px solid {color};
-                        background-color: #1C1E26;
-                        margin-bottom: 10px;
-                        border-radius: 5px;
+                        display:flex;align-items:center;gap:12px;
+                        padding:10px 14px;
+                        border-left:4px solid {accent};
+                        background:{bg};
+                        margin-bottom:8px;
+                        border-radius:0 8px 8px 0;
                     ">
-                        <strong>{row["status"]}</strong> | Confidence: {f'{row["confidence_score"]:.2f}' if row.get("confidence_score") is not None else "N/A"}<br>
-                        <small style="color: #bbb;">🕒 {t_stamp}</small>
+                        <span style="background:{lbl_bg};color:#FFF;font-size:10px;
+                            font-weight:800;padding:3px 8px;border-radius:4px;
+                            letter-spacing:0.8px;white-space:nowrap;">{label}</span>
+                        <span style="color:#1A2744;font-size:13px;flex:1;">
+                            Conf: <strong>{conf_str}</strong>
+                        </span>
+                        <span style="color:#5A7299;font-size:12px;">🕒 {t_stamp}</span>
                     </div>
                     """,
                     unsafe_allow_html=True
@@ -473,24 +728,12 @@ def display_operator_charts(container):
                 y="Count",
                 color="Status",
                 text="Count",
-                color_discrete_map={
-                    "Pass": "#21c354",
-                    "Fail": "#D6001C"
-                },
+                color_discrete_map={"Pass": CHART_PASS_COLOR, "Fail": CHART_FAIL_COLOR},
                 title="Pass vs Fail Count"
             )
-
-            fig_bar.update_layout(
-                plot_bgcolor="#0E1117",
-                paper_bgcolor="#0E1117",
-                font_color="white",
-                xaxis_title="Status",
-                yaxis_title="Count",
-                showlegend=False
-            )
-
-            fig_bar.update_traces(textposition="outside")
-
+            fig_bar.update_layout(**_chart_layout(xaxis_title="Status", yaxis_title="Count"))
+            fig_bar.update_traces(textposition="outside",
+                                  textfont=dict(color="#1A2744", size=12))
             chart_col1.plotly_chart(fig_bar, use_container_width=True)
 
             fig_pie = px.pie(
@@ -498,20 +741,14 @@ def display_operator_charts(container):
                 names="Status",
                 values="Count",
                 color="Status",
-                color_discrete_map={
-                    "Pass": "#21c354",
-                    "Fail": "#D6001C"
-                },
-                title="Pass vs Fail Percentage",
-                hole=0.4
+                color_discrete_map={"Pass": CHART_PASS_COLOR, "Fail": CHART_FAIL_COLOR},
+                title="Pass vs Fail Distribution",
+                hole=0.45
             )
-
-            fig_pie.update_layout(
-                plot_bgcolor="#0E1117",
-                paper_bgcolor="#0E1117",
-                font_color="white"
-            )
-
+            fig_pie.update_layout(**_chart_layout(showlegend=True,
+                legend=dict(bgcolor="#FFFFFF", bordercolor="#DDE4EF",
+                            font=dict(color="#1A2744"))))
+            fig_pie.update_traces(textfont=dict(color="#FFFFFF", size=13))
             chart_col2.plotly_chart(fig_pie, use_container_width=True)
 
     except Exception as e:
@@ -540,32 +777,39 @@ def show_result_card(container, status, confidence):
     container.empty()
 
     if status == "Pass":
-        color = "#21c354"
-        icon = "✅"
-        title = "PRODUCT PASSED"
-        message = f"OK confidence: {confidence:.2f}" if confidence is not None else "No defect detected"
+        bg        = "#0D9F4F"
+        border    = "#0A8040"
+        icon      = "✅"
+        title     = "PRODUCT PASSED"
+        message   = f"Confidence: {confidence:.2f}" if confidence is not None else "No defect detected"
         css_class = "result-pass"
     else:
-        color = "#D6001C"
-        icon = "❌"
-        title = "DEFECT DETECTED"
-        message = f"Defect confidence: {confidence:.2f}" if confidence is not None else "Defect detected"
+        bg        = "#D6001C"
+        border    = "#B5001A"
+        icon      = "❌"
+        title     = "DEFECT DETECTED"
+        message   = f"Defect confidence: {confidence:.2f}" if confidence is not None else "Defect detected"
         css_class = "result-fail"
 
     container.markdown(
         f"""
         <div class="{css_class}" style="
-            background-color: {color};
-            padding: 10px 14px;
-            border-radius: 8px;
-            color: white;
-            text-align: center;
-            margin-bottom: 8px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+            background:{bg};
+            border-bottom:4px solid {border};
+            padding:14px 20px;
+            border-radius:10px;
+            color:#FFFFFF;
+            display:flex;
+            align-items:center;
+            gap:14px;
+            margin-bottom:10px;
+            box-shadow:0 4px 14px rgba(0,0,0,0.18);
         ">
-            <span style="font-size: 22px;">{icon}</span>
-            <span style="font-size: 17px; font-weight: 800; margin-left: 8px;">{title}</span>
-            <span style="font-size: 13px; margin-left: 10px; opacity: 0.9;">{message}</span>
+            <span style="font-size:28px;line-height:1;">{icon}</span>
+            <div>
+                <div style="font-size:16px;font-weight:800;letter-spacing:0.5px;">{title}</div>
+                <div style="font-size:12px;opacity:0.88;margin-top:2px;">{message}</div>
+            </div>
         </div>
         """,
         unsafe_allow_html=True
@@ -597,15 +841,19 @@ def render_trend(container):
                 """
                 <div style="
                     text-align:center;
-                    padding: 24px 12px;
-                    border: 1px dashed #00205B;
-                    border-radius: 8px;
-                    color: #888;
-                    animation: fadeIn 0.4s ease-out;
+                    padding:28px 16px;
+                    border:1.5px dashed #DDE4EF;
+                    border-radius:10px;
+                    background:#FFFFFF;
+                    color:#5A7299;
+                    animation:fadeIn 0.4s ease-out;
                 ">
-                    <div style="font-size:28px;">📈</div>
-                    <div style="font-size:13px; margin-top:6px;">
-                        Trend will appear after<br>2+ inspections
+                    <div style="font-size:32px;">📈</div>
+                    <div style="font-size:13px;font-weight:600;color:#00205B;margin-top:8px;">
+                        Live Defect Trend
+                    </div>
+                    <div style="font-size:12px;color:#5A7299;margin-top:4px;">
+                        Appears after 2+ inspections
                     </div>
                 </div>
                 """,
@@ -631,16 +879,19 @@ def render_trend(container):
             annotation_font_color="#FFD700"
         )
         fig.update_layout(
-            title="Live Defect Rate Trend",
-            xaxis_title="Inspection #",
-            yaxis_title="Defect Rate (%)",
-            yaxis=dict(range=[0, 100]),
-            plot_bgcolor="#0E1117",
-            paper_bgcolor="#0E1117",
-            font_color="white",
-            height=260,
-            margin=dict(l=0, r=0, t=35, b=0),
-            showlegend=False
+            **_chart_layout(
+                title=dict(text="Live Defect Rate Trend",
+                           font=dict(color="#00205B", size=14)),
+                xaxis_title="Inspection #",
+                yaxis=dict(range=[0, 100], gridcolor="#EEF2F7",
+                           tickfont=dict(color="#1A2744", size=12),
+                           title_font=dict(color="#00205B", size=12)),
+                xaxis=dict(gridcolor="#EEF2F7",
+                           tickfont=dict(color="#1A2744", size=12),
+                           title_font=dict(color="#00205B", size=12)),
+                height=260,
+                margin=dict(l=0, r=0, t=40, b=0),
+            )
         )
         st.plotly_chart(fig, use_container_width=True)
 
@@ -650,21 +901,42 @@ def render_trend(container):
 # =========================================================
 
 if not st.session_state.logged_in:
-    try:
-        st.image(LOGO_PATH, width=300)
-    except Exception:
-        pass
-
-    st.title("🔐 AutoVision System Login")
-
-    col1, col2 = st.columns([1, 2])
-
-    with col1:
-        username = st.text_input("Username")
-        password = st.text_input("Password", type="password")
-
-        if st.button("Log In", use_container_width=True, type="primary"):
+    _, center, _ = st.columns([1, 1.4, 1])
+    with center:
+        st.markdown("<div style='height:40px'></div>", unsafe_allow_html=True)
+        try:
+            st.image(LOGO_PATH, use_container_width=True)
+        except Exception:
+            pass
+        st.markdown(
+            """
+            <div style="
+                background:#FFFFFF;
+                border:1px solid #DDE4EF;
+                border-top:4px solid #D6001C;
+                border-radius:12px;
+                padding:36px 40px 32px;
+                box-shadow:0 4px 24px rgba(0,32,91,0.10);
+                margin-top:24px;
+            ">
+                <h2 style="color:#00205B;font-weight:800;margin:0 0 4px;">Welcome Back</h2>
+                <p style="color:#5A7299;font-size:14px;margin:0 0 28px;">
+                    Sign in to AutoVision Defect System
+                </p>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+        username = st.text_input("Username", placeholder="Enter your username")
+        password = st.text_input("Password", type="password", placeholder="Enter your password")
+        st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
+        if st.button("Sign In", use_container_width=True, type="primary"):
             login(username, password)
+        st.markdown(
+            "<p style='text-align:center;color:#5A7299;font-size:12px;margin-top:20px;'>"
+            "DRB-HICOM Automated Defect Detection System</p>",
+            unsafe_allow_html=True
+        )
 
     st.stop()
 
@@ -673,29 +945,52 @@ if not st.session_state.logged_in:
 # 9. SIDEBAR AND NAVIGATION
 # =========================================================
 
+role = st.session_state.user.get("role", "operator")
+
+# =========================================================
+# SIDEBAR
+# =========================================================
+
 try:
     st.sidebar.image(LOGO_PATH, use_container_width=True)
-    st.sidebar.markdown("---")
 except Exception:
     pass
 
-st.sidebar.title(f"👤 {st.session_state.user['username']}")
-st.sidebar.caption(f"Role: {st.session_state.user.get('role', 'Operator').upper()}")
+# ── Navigation at the top ──
+st.sidebar.markdown("---")
 
-role = st.session_state.user.get("role", "operator")
+if role == "admin":
+    menu_options = [
+        "Defect Detection",
+        "Inspection Logs",
+        "User Management (Admin)",
+        "Manage Profile"
+    ]
+else:
+    menu_options = [
+        "Defect Detection",
+        "Manage Profile"
+    ]
 
+selected_page = st.sidebar.radio("📌 Navigation", menu_options)
 
-# =========================================================
-# ARDUINO COM PORT SELECTION
-# =========================================================
+# ── User info ──
+st.sidebar.markdown("---")
+st.sidebar.markdown(
+    f"<div style='color:#FFFFFF;font-size:15px;font-weight:700;'>👤 {st.session_state.user['username']}</div>"
+    f"<div style='color:#A8C4E8;font-size:12px;margin-top:2px;'>Role: {st.session_state.user.get('role','Operator').upper()}</div>",
+    unsafe_allow_html=True
+)
 
+# ── Arduino COM Port ──
+st.sidebar.markdown("---")
 available_ports = get_available_ports()
 
 if available_ports:
     default_port = get_default_port(available_ports)
     default_index = available_ports.index(default_port) if default_port in available_ports else 0
     selected_port = st.sidebar.selectbox(
-        "Arduino COM Port",
+        "🔌 Arduino COM Port",
         available_ports,
         index=default_index
     )
@@ -709,39 +1004,12 @@ if st.session_state.get("_last_arduino_port") != selected_port:
 
 arduino = connect_arduino(selected_port)
 
+# ── System Health ──
 st.sidebar.markdown("---")
-st.sidebar.subheader("📷 Camera Settings")
-camera_index = st.sidebar.number_input(
-    "Camera Index",
-    min_value=0,
-    max_value=5,
-    value=0,
-    step=1,
-    help="0 = first camera. Change to 1 or 2 if the wrong camera opens."
+st.sidebar.markdown(
+    "<div style='color:#FFFFFF;font-size:13px;font-weight:700;letter-spacing:0.5px;'>🖥️ SYSTEM HEALTH</div>",
+    unsafe_allow_html=True
 )
-
-scan_delay = st.sidebar.slider(
-    "Scan Delay (s)",
-    min_value=0.5,
-    max_value=4.0,
-    value=1.5,
-    step=0.1,
-    help="Wait time after IR trigger before scanning. Increase if the product is still moving when scanned."
-)
-
-conf_threshold_ui = st.sidebar.slider(
-    "Defect Confidence Threshold",
-    min_value=0.30,
-    max_value=0.90,
-    value=0.50,
-    step=0.05,
-    help="Minimum confidence to count a frame as defective. Lower = more sensitive to defects."
-)
-
-fail_votes_required = 2
-
-st.sidebar.markdown("---")
-st.sidebar.subheader("🖥️ System Health")
 
 cam_ok = st.session_state.get("camera_active", False)
 arduino_ok = arduino is not None and arduino.is_open
@@ -757,29 +1025,37 @@ if time.time() - _last_db_check > 30:
     st.session_state["_last_db_check_time"] = time.time()
 db_ok = st.session_state.get("_db_ok", True)
 
+def _health_row(ok, label, on_text, off_text):
+    text  = on_text if ok else off_text
+    bg    = "rgba(13,159,79,0.18)"  if ok else "rgba(214,0,28,0.18)"
+    dot   = "#4ADE80"               if ok else "#FF6B6B"
+    badge = "rgba(13,159,79,0.30)"  if ok else "rgba(214,0,28,0.30)"
+    return (
+        f"<div style='display:flex;align-items:center;gap:10px;"
+        f"background:{bg};border-radius:8px;"
+        f"padding:8px 12px;margin-bottom:6px;'>"
+        f"<span style='width:8px;height:8px;border-radius:50%;"
+        f"background:{dot};display:inline-block;flex-shrink:0;'></span>"
+        f"<span style='color:#FFFFFF;font-size:13px;flex:1;font-weight:500;'>{label}</span>"
+        f"<span style='background:{badge};color:#FFFFFF;font-size:11px;"
+        f"font-weight:700;padding:2px 8px;border-radius:20px;'>{text}</span>"
+        f"</div>"
+    )
+
 st.sidebar.markdown(
-    f"{'🟢' if cam_ok else '🔴'} **Camera:** {'Active' if cam_ok else 'Inactive'}\n\n"
-    f"{'🟢' if arduino_ok else '🔴'} **Arduino:** {'Connected' if arduino_ok else 'Disconnected'}\n\n"
-    f"{'🟢' if db_ok else '🔴'} **Database:** {'Online' if db_ok else 'Offline'}\n\n"
-    f"{'🟢' if model_ok else '🔴'} **AI Model:** {'Loaded' if model_ok else 'Not loaded'}"
+    _health_row(cam_ok,    "Camera",   "Active",       "Inactive")    +
+    _health_row(arduino_ok,"Arduino",  "Connected",    "Disconnected")+
+    _health_row(db_ok,     "Database", "Online",       "Offline")     +
+    _health_row(model_ok,  "AI Model", "Loaded",       "Not loaded"),
+    unsafe_allow_html=True
 )
 
+# ── Log Out ──
+st.sidebar.markdown("---")
+if st.sidebar.button("🚪 Log Out", use_container_width=True):
+    logout()
 
-if role == "admin":
-    menu_options = [
-        "Defect Detection",
-        "Inspection Logs",
-        "User Management (Admin)",
-        "Manage Profile"
-    ]
-else:
-    menu_options = [
-        "Defect Detection",
-        "Manage Profile"
-    ]
-
-selected_page = st.sidebar.radio("Navigation", menu_options)
-
+# page title tag
 _page_titles = {
     "Defect Detection": "Defect Detection",
     "Inspection Logs": "Inspection Logs",
@@ -792,8 +1068,7 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-if st.sidebar.button("Log Out"):
-    logout()
+fail_votes_required = 2
 
 
 # =========================================================
@@ -802,6 +1077,24 @@ if st.sidebar.button("Log Out"):
 
 if selected_page == "Defect Detection":
     st.title("🛡️ Defect Detection & Operator Dashboard")
+
+    with st.expander("⚙️ Camera & Scan Settings", expanded=False):
+        s1, s2, s3 = st.columns(3)
+        camera_index = s1.number_input(
+            "Camera Index",
+            min_value=0, max_value=5, value=0, step=1,
+            help="0 = first camera. Change to 1 or 2 if the wrong camera opens."
+        )
+        scan_delay = s2.slider(
+            "Scan Delay (s)",
+            min_value=0.5, max_value=4.0, value=1.5, step=0.1,
+            help="Wait time after IR trigger before scanning."
+        )
+        conf_threshold_ui = s3.slider(
+            "Defect Confidence Threshold",
+            min_value=0.30, max_value=0.90, value=0.50, step=0.05,
+            help="Minimum confidence to count a frame as defective. Lower = more sensitive."
+        )
 
     conf_threshold = conf_threshold_ui
 
@@ -1099,22 +1392,36 @@ if selected_page == "Defect Detection":
         st.markdown(
             f"""
             <div style="
-                background: linear-gradient(135deg, #00153B, #00205B);
-                border: 1px solid #D6001C;
-                border-radius: 10px;
-                padding: 16px 20px;
-                margin-top: 12px;
-                animation: fadeIn 0.5s ease-out;
-                color: white;
+                background:#FFFFFF;
+                border:1px solid #DDE4EF;
+                border-top:4px solid #00205B;
+                border-radius:10px;
+                padding:20px 24px;
+                margin-top:16px;
+                animation:fadeIn 0.5s ease-out;
+                box-shadow:0 2px 10px rgba(0,32,91,0.07);
             ">
-                <div style="font-size:15px; font-weight:700; margin-bottom:10px;">
+                <div style="font-size:13px;font-weight:700;color:#5A7299;
+                    text-transform:uppercase;letter-spacing:0.8px;margin-bottom:16px;">
                     📊 Session Summary
                 </div>
-                <div style="display:flex; gap:32px; font-size:14px;">
-                    <span>🔢 Total: <strong>{st_total}</strong></span>
-                    <span style="color:#21c354;">✅ Passed: <strong>{sp}</strong></span>
-                    <span style="color:#D6001C;">❌ Failed: <strong>{sf}</strong></span>
-                    <span>📉 Fail Rate: <strong>{rate:.1f}%</strong></span>
+                <div style="display:flex;gap:0;flex-wrap:wrap;">
+                    <div style="flex:1;min-width:80px;border-right:1px solid #EEF2F7;padding:0 20px 0 0;margin-right:20px;">
+                        <div style="font-size:24px;font-weight:800;color:#00205B;">{st_total}</div>
+                        <div style="font-size:11px;color:#5A7299;text-transform:uppercase;letter-spacing:0.5px;">Total</div>
+                    </div>
+                    <div style="flex:1;min-width:80px;border-right:1px solid #EEF2F7;padding:0 20px 0 0;margin-right:20px;">
+                        <div style="font-size:24px;font-weight:800;color:#0D9F4F;">{sp}</div>
+                        <div style="font-size:11px;color:#5A7299;text-transform:uppercase;letter-spacing:0.5px;">Passed</div>
+                    </div>
+                    <div style="flex:1;min-width:80px;border-right:1px solid #EEF2F7;padding:0 20px 0 0;margin-right:20px;">
+                        <div style="font-size:24px;font-weight:800;color:#D6001C;">{sf}</div>
+                        <div style="font-size:11px;color:#5A7299;text-transform:uppercase;letter-spacing:0.5px;">Failed</div>
+                    </div>
+                    <div style="flex:1;min-width:80px;">
+                        <div style="font-size:24px;font-weight:800;color:#1A2744;">{rate:.1f}%</div>
+                        <div style="font-size:11px;color:#5A7299;text-transform:uppercase;letter-spacing:0.5px;">Fail Rate</div>
+                    </div>
                 </div>
             </div>
             """,
@@ -1223,47 +1530,26 @@ elif selected_page == "Inspection Logs":
 
             fig_bar = px.bar(
                 status_counts,
-                x="Status",
-                y="Count",
-                color="Status",
-                text="Count",
-                color_discrete_map={
-                    "Pass": "#21c354",
-                    "Fail": "#D6001C"
-                },
+                x="Status", y="Count", color="Status", text="Count",
+                color_discrete_map={"Pass": CHART_PASS_COLOR, "Fail": CHART_FAIL_COLOR},
                 title="Pass vs Fail Count"
             )
-
-            fig_bar.update_layout(
-                plot_bgcolor="#0E1117",
-                paper_bgcolor="#0E1117",
-                font_color="white",
-                showlegend=False
-            )
-
-            fig_bar.update_traces(textposition="outside")
-
+            fig_bar.update_layout(**_chart_layout(xaxis_title="Status", yaxis_title="Count"))
+            fig_bar.update_traces(textposition="outside",
+                                  textfont=dict(color="#1A2744", size=12))
             chart_col1.plotly_chart(fig_bar, use_container_width=True)
 
             fig_pie = px.pie(
                 status_counts,
-                names="Status",
-                values="Count",
-                color="Status",
-                color_discrete_map={
-                    "Pass": "#21c354",
-                    "Fail": "#D6001C"
-                },
-                title="Pass vs Fail Percentage",
-                hole=0.4
+                names="Status", values="Count", color="Status",
+                color_discrete_map={"Pass": CHART_PASS_COLOR, "Fail": CHART_FAIL_COLOR},
+                title="Pass vs Fail Distribution",
+                hole=0.45
             )
-
-            fig_pie.update_layout(
-                plot_bgcolor="#0E1117",
-                paper_bgcolor="#0E1117",
-                font_color="white"
-            )
-
+            fig_pie.update_layout(**_chart_layout(showlegend=True,
+                legend=dict(bgcolor="#FFFFFF", bordercolor="#DDE4EF",
+                            font=dict(color="#1A2744"))))
+            fig_pie.update_traces(textfont=dict(color="#FFFFFF", size=13))
             chart_col2.plotly_chart(fig_pie, use_container_width=True)
 
             st.divider()
@@ -1308,9 +1594,9 @@ elif selected_page == "Inspection Logs":
 
             def highlight_status(val):
                 if val == "Fail":
-                    return "color: #ff4b4b; font-weight: bold"
+                    return "color: #D6001C; font-weight: 700"
                 if val == "Pass":
-                    return "color: #21c354; font-weight: bold"
+                    return "color: #0D9F4F; font-weight: 700"
                 return ""
 
             st.dataframe(
