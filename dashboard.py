@@ -1004,16 +1004,10 @@ if st.session_state.get("_last_arduino_port") != selected_port:
 
 arduino = connect_arduino(selected_port)
 
-# ── System Health ──
-st.sidebar.markdown("---")
-st.sidebar.markdown(
-    "<div style='color:#FFFFFF;font-size:13px;font-weight:700;letter-spacing:0.5px;'>🖥️ SYSTEM HEALTH</div>",
-    unsafe_allow_html=True
-)
-
-cam_ok = st.session_state.get("camera_active", False)
+# ── Compute health state (rendered on Defect Detection page) ──
+cam_ok     = st.session_state.get("camera_active", False)
 arduino_ok = arduino is not None and arduino.is_open
-model_ok = model is not None
+model_ok   = model is not None
 
 _last_db_check = st.session_state.get("_last_db_check_time", 0)
 if time.time() - _last_db_check > 30:
@@ -1027,28 +1021,20 @@ db_ok = st.session_state.get("_db_ok", True)
 
 def _health_row(ok, label, on_text, off_text):
     text  = on_text if ok else off_text
-    bg    = "rgba(13,159,79,0.18)"  if ok else "rgba(214,0,28,0.18)"
-    dot   = "#4ADE80"               if ok else "#FF6B6B"
-    badge = "rgba(13,159,79,0.30)"  if ok else "rgba(214,0,28,0.30)"
+    bg    = "#EAF7EE" if ok else "#FFF0F2"
+    dot   = "#0D9F4F" if ok else "#D6001C"
+    badge_bg = "#0D9F4F" if ok else "#D6001C"
     return (
-        f"<div style='display:flex;align-items:center;gap:10px;"
+        f"<div style='display:flex;align-items:center;gap:12px;"
         f"background:{bg};border-radius:8px;"
-        f"padding:8px 12px;margin-bottom:6px;'>"
-        f"<span style='width:8px;height:8px;border-radius:50%;"
+        f"padding:10px 14px;margin-bottom:8px;border:1px solid {'#C6EFCE' if ok else '#FFCDD2'};'>"
+        f"<span style='width:9px;height:9px;border-radius:50%;"
         f"background:{dot};display:inline-block;flex-shrink:0;'></span>"
-        f"<span style='color:#FFFFFF;font-size:13px;flex:1;font-weight:500;'>{label}</span>"
-        f"<span style='background:{badge};color:#FFFFFF;font-size:11px;"
-        f"font-weight:700;padding:2px 8px;border-radius:20px;'>{text}</span>"
+        f"<span style='color:#1A2744;font-size:13px;flex:1;font-weight:600;'>{label}</span>"
+        f"<span style='background:{badge_bg};color:#FFFFFF;font-size:11px;"
+        f"font-weight:700;padding:3px 10px;border-radius:20px;letter-spacing:0.3px;'>{text}</span>"
         f"</div>"
     )
-
-st.sidebar.markdown(
-    _health_row(cam_ok,    "Camera",   "Active",       "Inactive")    +
-    _health_row(arduino_ok,"Arduino",  "Connected",    "Disconnected")+
-    _health_row(db_ok,     "Database", "Online",       "Offline")     +
-    _health_row(model_ok,  "AI Model", "Loaded",       "Not loaded"),
-    unsafe_allow_html=True
-)
 
 # ── Log Out ──
 st.sidebar.markdown("---")
@@ -1097,6 +1083,20 @@ if selected_page == "Defect Detection":
         )
 
     conf_threshold = conf_threshold_ui
+
+    # ── System Health ──
+    st.markdown(
+        "<p style='font-size:12px;font-weight:700;color:#5A7299;"
+        "text-transform:uppercase;letter-spacing:0.8px;margin-bottom:8px;'>"
+        "🖥️ System Health</p>",
+        unsafe_allow_html=True
+    )
+    h1, h2, h3, h4 = st.columns(4)
+    h1.markdown(_health_row(cam_ok,     "Camera",    "Active",    "Inactive"),     unsafe_allow_html=True)
+    h2.markdown(_health_row(arduino_ok, "Arduino",   "Connected", "Disconnected"), unsafe_allow_html=True)
+    h3.markdown(_health_row(db_ok,      "Database",  "Online",    "Offline"),      unsafe_allow_html=True)
+    h4.markdown(_health_row(model_ok,   "AI Model",  "Loaded",    "Not loaded"),   unsafe_allow_html=True)
+    st.divider()
 
     def render_today_counter(container):
         passed, failed = fetch_today_counts()
